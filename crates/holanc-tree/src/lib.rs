@@ -110,6 +110,16 @@ impl MerkleTree {
         self.next_index == 0
     }
 
+    /// Get the next leaf index (same as len).
+    pub fn next_index(&self) -> u64 {
+        self.next_index
+    }
+
+    /// Get the depth of the tree.
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
     /// Generate a Merkle proof for the leaf at `index`.
     /// Returns (path_elements, path_indices) for circuit input.
     pub fn proof(&self, index: u64) -> Result<MerkleProof, TreeError> {

@@ -64,6 +64,11 @@ impl SpendingKey {
         &self.bytes
     }
 
+    /// Reconstruct a spending key from raw 32-byte representation.
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self::from_seed(&bytes)
+    }
+
     pub fn scalar(&self) -> &Fr {
         &self.scalar
     }

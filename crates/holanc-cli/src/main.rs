@@ -4,6 +4,11 @@ use holanc_client::Wallet;
 use std::io::{self, BufRead, Write};
 
 fn main() {
+    println!("╔══════════════════════════════════════════╗");
+    println!("║         Holanc Privacy Protocol          ║");
+    println!("║         Interactive CLI v0.1.0           ║");
+    println!("╚══════════════════════════════════════════╝");
+    println!();
     println!("Initializing Holanc wallet...");
     let mut wallet = Wallet::random();
     println!("Ready. Wallet owner: {}", hex::encode(&wallet.owner()[..8]));
@@ -25,69 +30,346 @@ fn main() {
 
         let parts: Vec<&str> = line.split_whitespace().collect();
         match parts[0] {
-            "help" => print_help(),
-            "deposit" => {
-                if parts.len() < 2 {
-                    println!("Usage: deposit <amount>");
-                    continue;
-                }
-                match parts[1].parse::<u64>() {
-                    Ok(amount) => {
-                        let note = wallet.add_deposit_note(amount);
-                        let leaf_index = note.leaf_index.unwrap_or(0);
-                        println!(
-                            "Deposited {}. Leaf index: {}. Commitment: {}",
-                            amount,
-                            leaf_index,
-                            hex::encode(&note.commitment().0[..8])
-                        );
-                    }
-                    Err(_) => println!("Invalid amount"),
-                }
-            }
-            "balance" => {
-                println!("Wallet balance: {}", wallet.balance());
-                println!("Unspent notes: {}", wallet.unspent_notes().len());
-            }
-            "history" => {
-                for (i, tx) in wallet.history().iter().enumerate() {
-                    println!("[{}] {:?}", i, tx);
-                }
-                if wallet.history().is_empty() {
-                    println!("No transactions yet.");
-                }
-            }
-            "notes" => {
-                for note in wallet.unspent_notes() {
-                    println!(
-                        "  leaf={:?} value={} commitment={}",
-                        note.leaf_index,
-                        note.value,
-                        hex::encode(&note.commitment().0[..8])
-                    );
-                }
-            }
+            "help" | "h" | "?" => print_help(),
+
+            "deposit" | "d" => cmd_deposit(&mut wallet, &parts),
+            "transfer" | "t" => cmd_transfer(&mut wallet, &parts),
+            "withdraw" | "w" => cmd_withdraw(&mut wallet, &parts),
+
+            "balance" | "bal" => cmd_balance(&wallet),
+            "notes" | "n" => cmd_notes(&wallet),
+            "history" | "hist" => cmd_history(&wallet),
+
+            "tree" => cmd_tree_info(&wallet),
             "root" => {
                 println!("Merkle root: {}", hex::encode(wallet.tree().root()));
             }
-            "quit" | "exit" => {
+            "proof" => cmd_proof(&wallet, &parts),
+
+            "export-key" => cmd_export_key(&wallet),
+            "import-key" => cmd_import_key(&mut wallet, &parts),
+
+            "status" => cmd_status(&wallet),
+
+            "quit" | "exit" | "q" => {
                 println!("Goodbye.");
                 break;
             }
             _ => {
-                println!("Unknown command: {}. Type 'help' for commands.", parts[0]);
+                println!("Unknown command: '{}'. Type 'help' for commands.", parts[0]);
             }
         }
     }
 }
 
+fn cmd_deposit(wallet: &mut Wallet, parts: &[&str]) {
+    if parts.len() < 2 {
+        println!("Usage: deposit <amount>");
+        return;
+    }
+    match parts[1].parse::<u64>() {
+        Ok(amount) if amount > 0 => {
+            let note = wallet.add_deposit_note(amount);
+            let leaf_index = note.leaf_index.unwrap_or(0);
+            println!(
+                "  ✓ Deposited {} lamports",
+                amount
+            );
+            println!("    Leaf index:  {}", leaf_index);
+            println!(
+                "    Commitment:  {}",
+                hex::encode(&note.commitment().0[..16])
+            );
+            println!(
+                "    Merkle root: {}",
+                hex::encode(&wallet.tree().root()[..16])
+            );
+        }
+        Ok(_) => println!("Amount must be > 0"),
+        Err(_) => println!("Invalid amount: {}", parts[1]),
+    }
+}
+
+fn cmd_transfer(wallet: &mut Wallet, parts: &[&str]) {
+    if parts.len() < 3 {
+        println!("Usage: transfer <recipient_hex> <amount> [fee]");
+        println!("  recipient_hex: 64-char hex spending key of recipient");
+        return;
+    }
+    let recipient_hex = parts[1];
+    if recipient_hex.len() != 64 {
+        println!("Recipient must be a 64-character hex string (32 bytes).");
+        return;
+    }
+    let mut recipient = [0u8; 32];
+    match hex::decode(recipient_hex) {
+        Ok(bytes) if bytes.len() == 32 => recipient.copy_from_slice(&bytes),
+        _ => {
+            println!("Invalid recipient hex.");
+            return;
+        }
+    }
+    let amount: u64 = match parts[2].parse() {
+        Ok(a) if a > 0 => a,
+        _ => {
+            println!("Invalid amount.");
+            return;
+        }
+    };
+    let fee: u64 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    match wallet.prepare_transfer(recipient, amount, fee) {
+        Ok(prepared) => {
+            println!("  ✓ Transfer prepared (offline)");
+            println!("    Amount: {}, Fee: {}", amount, fee);
+            println!(
+                "    Input notes:  {} (values: {}, {})",
+                2,
+                prepared.input_notes[0].value,
+                prepared.input_notes[1].value,
+            );
+            println!(
+                "    Output[0]:    {} (to recipient)",
+                hex::encode(&prepared.output_notes[0].commitment().0[..8])
+            );
+            println!(
+                "    Output[1]:    {} (change)",
+                hex::encode(&prepared.output_notes[1].commitment().0[..8])
+            );
+            println!("    → Use 'prove transfer' to generate the ZK proof.");
+            // Mark inputs spent locally
+            let indices: Vec<u64> = prepared
+                .input_notes
+                .iter()
+                .filter_map(|n| n.leaf_index)
+                .collect();
+            wallet.mark_spent(&indices);
+        }
+        Err(e) => println!("  ✗ Transfer failed: {}", e),
+    }
+}
+
+fn cmd_withdraw(wallet: &mut Wallet, parts: &[&str]) {
+    if parts.len() < 2 {
+        println!("Usage: withdraw <amount> [fee]");
+        return;
+    }
+    let amount: u64 = match parts[1].parse() {
+        Ok(a) if a > 0 => a,
+        _ => {
+            println!("Invalid amount.");
+            return;
+        }
+    };
+    let fee: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    match wallet.prepare_withdraw(amount, fee) {
+        Ok(prepared) => {
+            println!("  ✓ Withdrawal prepared (offline)");
+            println!("    Exit value: {}, Fee: {}", prepared.exit_value, fee);
+            println!(
+                "    Input notes: values ({}, {})",
+                prepared.input_notes[0].value,
+                prepared.input_notes[1].value,
+            );
+            println!("    → Use 'prove withdraw' to generate the ZK proof.");
+            let indices: Vec<u64> = prepared
+                .input_notes
+                .iter()
+                .filter_map(|n| n.leaf_index)
+                .collect();
+            wallet.mark_spent(&indices);
+        }
+        Err(e) => println!("  ✗ Withdrawal failed: {}", e),
+    }
+}
+
+fn cmd_balance(wallet: &Wallet) {
+    let balance = wallet.balance();
+    let unspent = wallet.unspent_notes().len();
+    let total_notes = wallet.history().len();
+    println!("  Balance:       {} lamports", balance);
+    println!("  Unspent notes: {}", unspent);
+    println!("  Transactions:  {}", total_notes);
+}
+
+fn cmd_notes(wallet: &Wallet) {
+    let notes = wallet.unspent_notes();
+    if notes.is_empty() {
+        println!("  No unspent notes.");
+        return;
+    }
+    println!("  {:>6}  {:>12}  {:>16}", "Leaf", "Value", "Commitment");
+    println!("  {:─>6}  {:─>12}  {:─>16}", "", "", "");
+    for note in notes {
+        println!(
+            "  {:>6}  {:>12}  {}",
+            note.leaf_index.map(|i| i.to_string()).unwrap_or("?".into()),
+            note.value,
+            hex::encode(&note.commitment().0[..8])
+        );
+    }
+}
+
+fn cmd_history(wallet: &Wallet) {
+    let history = wallet.history();
+    if history.is_empty() {
+        println!("  No transactions yet.");
+        return;
+    }
+    for (i, tx) in history.iter().enumerate() {
+        match tx {
+            holanc_client::TxRecord::Deposit {
+                amount,
+                leaf_index,
+            } => {
+                println!("  [{}] DEPOSIT  amount={} leaf={}", i, amount, leaf_index);
+            }
+            holanc_client::TxRecord::Send {
+                amount,
+                fee,
+                nullifiers,
+            } => {
+                println!(
+                    "  [{}] SEND     amount={} fee={} nullifier={}…",
+                    i,
+                    amount,
+                    fee,
+                    hex::encode(&nullifiers[0][..4])
+                );
+            }
+            holanc_client::TxRecord::Withdraw {
+                amount,
+                fee,
+                nullifiers,
+            } => {
+                println!(
+                    "  [{}] WITHDRAW amount={} fee={} nullifier={}…",
+                    i,
+                    amount,
+                    fee,
+                    hex::encode(&nullifiers[0][..4])
+                );
+            }
+        }
+    }
+}
+
+fn cmd_tree_info(wallet: &Wallet) {
+    let tree = wallet.tree();
+    let root = tree.root();
+    let next_index = tree.next_index();
+    let depth = tree.depth();
+
+    println!("  Merkle Tree Info");
+    println!("  ────────────────");
+    println!("  Depth:      {}", depth);
+    println!("  Leaves:     {}", next_index);
+    println!("  Capacity:   {}", 1u64 << depth);
+    println!(
+        "  Root:       {}",
+        hex::encode(&root[..16])
+    );
+    println!(
+        "  Full root:  {}",
+        hex::encode(root)
+    );
+}
+
+fn cmd_proof(wallet: &Wallet, parts: &[&str]) {
+    if parts.len() < 2 {
+        println!("Usage: proof <leaf_index>");
+        println!("  Generates a Merkle inclusion proof for the given leaf.");
+        return;
+    }
+    let index: u64 = match parts[1].parse() {
+        Ok(i) => i,
+        Err(_) => {
+            println!("Invalid leaf index.");
+            return;
+        }
+    };
+    match wallet.tree().proof(index) {
+        Ok(proof) => {
+            println!("  Merkle Proof for leaf {}", index);
+            println!("  Root:     {}", hex::encode(proof.root));
+            println!("  Path indices: {:?}", proof.path_indices);
+            println!("  Path elements:");
+            for (level, elem) in proof.path_elements.iter().enumerate() {
+                println!("    [{}] {}", level, hex::encode(&elem[..16]));
+            }
+        }
+        Err(e) => println!("  ✗ Proof error: {}", e),
+    }
+}
+
+fn cmd_export_key(wallet: &Wallet) {
+    let owner = wallet.owner();
+    println!("  Spending key (hex): {}", hex::encode(owner));
+    println!("  ⚠ Keep this key safe! Anyone with it can spend your notes.");
+}
+
+fn cmd_import_key(wallet: &mut Wallet, parts: &[&str]) {
+    if parts.len() < 2 {
+        println!("Usage: import-key <64_char_hex>");
+        println!("  ⚠ This will reset the wallet. Existing notes are lost.");
+        return;
+    }
+    let hex_str = parts[1];
+    if hex_str.len() != 64 {
+        println!("Key must be a 64-character hex string (32 bytes).");
+        return;
+    }
+    match hex::decode(hex_str) {
+        Ok(bytes) if bytes.len() == 32 => {
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(&bytes);
+            *wallet = Wallet::new(holanc_note::keys::SpendingKey::from_bytes(key_bytes));
+            println!("  ✓ Wallet imported. Owner: {}", hex::encode(&key_bytes[..8]));
+            println!("  Note: local notes and tree are reset.");
+        }
+        _ => println!("Invalid hex key."),
+    }
+}
+
+fn cmd_status(wallet: &Wallet) {
+    println!("  Holanc Privacy Protocol — Local Status");
+    println!("  ──────────────────────────────────────");
+    println!("  Owner:       {}…", hex::encode(&wallet.owner()[..8]));
+    println!("  Balance:     {} lamports", wallet.balance());
+    println!("  Notes:       {} unspent", wallet.unspent_notes().len());
+    println!("  Tree leaves: {}", wallet.tree().next_index());
+    println!(
+        "  Merkle root: {}…",
+        hex::encode(&wallet.tree().root()[..8])
+    );
+}
+
 fn print_help() {
-    println!("Commands:");
-    println!("  deposit <amount>  — Deposit into the privacy pool");
-    println!("  balance           — Show wallet balance");
-    println!("  notes             — List unspent notes");
-    println!("  history           — Show transaction history");
-    println!("  root              — Show current Merkle root");
-    println!("  help              — Show this help");
-    println!("  quit              — Exit");
+    println!("╭──────────────────────────────────────────────────────────╮");
+    println!("│ Holanc CLI Commands                                     │");
+    println!("├──────────────────────────────────────────────────────────┤");
+    println!("│ Wallet Operations                                       │");
+    println!("│   deposit <amount>              — Deposit into pool     │");
+    println!("│   transfer <recipient> <amount> — Prepare transfer      │");
+    println!("│   withdraw <amount> [fee]       — Prepare withdrawal    │");
+    println!("│                                                         │");
+    println!("│ Wallet Info                                             │");
+    println!("│   balance / bal     — Show wallet balance               │");
+    println!("│   notes / n         — List unspent notes                │");
+    println!("│   history / hist    — Show transaction history          │");
+    println!("│   status            — Overview of wallet state          │");
+    println!("│                                                         │");
+    println!("│ Merkle Tree                                             │");
+    println!("│   tree              — Merkle tree info                  │");
+    println!("│   root              — Show current Merkle root          │");
+    println!("│   proof <index>     — Merkle proof for leaf index       │");
+    println!("│                                                         │");
+    println!("│ Key Management                                          │");
+    println!("│   export-key        — Show spending key (hex)           │");
+    println!("│   import-key <hex>  — Import spending key (resets tree) │");
+    println!("│                                                         │");
+    println!("│   help / h / ?      — Show this help                   │");
+    println!("│   quit / exit / q   — Exit CLI                         │");
+    println!("╰──────────────────────────────────────────────────────────╯");
 }

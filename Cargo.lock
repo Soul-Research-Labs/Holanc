@@ -1036,6 +1036,8 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "holanc-verifier",
+ "solana-hash",
+ "solana-sha256-hasher",
 ]
 
 [[package]]

@@ -20,3 +20,5 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
 holanc-verifier = { path = "../holanc-verifier", features = ["cpi"] }
+solana-hash = "2.3"
+solana-sha256-hasher = "2.3"
