@@ -1,0 +1,11 @@
+[package]
+name = "holanc-tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Off-chain Poseidon Merkle tree for Holanc, mirroring the on-chain commitment tree"
+
+[dependencies]
+holanc-primitives = { path = "../holanc-primitives" }
+serde = { workspace = true }
+thiserror = { workspace = true }

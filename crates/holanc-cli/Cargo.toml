@@ -1,0 +1,18 @@
+[package]
+name = "holanc-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Interactive CLI for the Holanc privacy protocol"
+
+[[bin]]
+name = "holanc"
+path = "src/main.rs"
+
+[dependencies]
+holanc-primitives = { path = "../holanc-primitives" }
+holanc-note = { path = "../holanc-note" }
+holanc-tree = { path = "../holanc-tree" }
+holanc-client = { path = "../holanc-client" }
+serde_json = { workspace = true }
+hex = { workspace = true }

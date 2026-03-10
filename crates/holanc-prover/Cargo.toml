@@ -1,0 +1,15 @@
+[package]
+name = "holanc-prover"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Off-chain proof generation for Holanc using snarkjs/Circom FFI"
+
+[dependencies]
+holanc-primitives = { path = "../holanc-primitives" }
+holanc-note = { path = "../holanc-note" }
+holanc-tree = { path = "../holanc-tree" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }

@@ -1,0 +1,27 @@
+[package]
+name = "holanc-note"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Note model, key management, ECDH encryption, and stealth addresses for Holanc"
+
+[dependencies]
+holanc-primitives = { path = "../holanc-primitives" }
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-ec = { workspace = true }
+ark-std = { workspace = true }
+ark-serialize = { workspace = true }
+chacha20poly1305 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+rand_core = { workspace = true }
+zeroize = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }

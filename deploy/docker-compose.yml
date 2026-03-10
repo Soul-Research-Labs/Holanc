@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  validator:
+    image: solanalabs/solana:latest
+    command: solana-test-validator --reset
+    ports:
+      - "8899:8899" # RPC
+      - "8900:8900" # WebSocket
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8899/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  relayer:
+    build:
+      context: ../relayer
+      dockerfile: ../deploy/Dockerfile.relayer
+    ports:
+      - "3001:3001"
+    environment:
+      SOLANA_RPC_URL: http://validator:8899
+      RELAYER_PORT: "3001"
+      RATE_LIMIT_MAX: "60"
+    depends_on:
+      validator:
+        condition: service_healthy
+
+  indexer:
+    build:
+      context: ../indexer
+      dockerfile: ../deploy/Dockerfile.indexer
+    volumes:
+      - indexer-data:/data
+    environment:
+      SOLANA_RPC_URL: http://validator:8899
+      INDEXER_DB_PATH: /data/holanc-indexer.db
+    depends_on:
+      validator:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ../app
+      dockerfile: ../deploy/Dockerfile.app
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_RPC_URL: http://validator:8899
+      NEXT_PUBLIC_RELAYER_URL: http://relayer:3001
+    depends_on:
+      - relayer
+
+volumes:
+  indexer-data:

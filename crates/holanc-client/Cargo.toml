@@ -1,0 +1,16 @@
+[package]
+name = "holanc-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Client wallet, key management, note tracking, and coin selection for Holanc"
+
+[dependencies]
+holanc-primitives = { path = "../holanc-primitives" }
+holanc-note = { path = "../holanc-note" }
+holanc-tree = { path = "../holanc-tree" }
+holanc-prover = { path = "../holanc-prover" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }

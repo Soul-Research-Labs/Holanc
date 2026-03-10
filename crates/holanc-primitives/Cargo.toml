@@ -1,0 +1,21 @@
+[package]
+name = "holanc-primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core cryptographic primitives for Holanc: Poseidon hash, commitments, nullifiers, proof envelopes"
+
+[dependencies]
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-std = { workspace = true }
+light-poseidon = { workspace = true }
+rand = { workspace = true }
+rand_core = { workspace = true }
+zeroize = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
