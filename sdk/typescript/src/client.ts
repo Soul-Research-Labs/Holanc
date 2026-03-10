@@ -41,11 +41,25 @@ export class HolancClient {
   private prover: HolancProver;
   private payer: Keypair;
 
-  constructor(rpcUrl: string, payer: Keypair, wallet?: HolancWallet) {
-    this.connection = new Connection(rpcUrl, "confirmed");
+  private constructor(
+    connection: Connection,
+    payer: Keypair,
+    wallet: HolancWallet,
+  ) {
+    this.connection = connection;
     this.payer = payer;
-    this.wallet = wallet ?? HolancWallet.random();
+    this.wallet = wallet;
     this.prover = new HolancProver();
+  }
+
+  static async create(
+    rpcUrl: string,
+    payer: Keypair,
+    wallet?: HolancWallet,
+  ): Promise<HolancClient> {
+    const connection = new Connection(rpcUrl, "confirmed");
+    const w = wallet ?? (await HolancWallet.random());
+    return new HolancClient(connection, payer, w);
   }
 
   /** Get the wallet's shielded balance. */
@@ -71,8 +85,8 @@ export class HolancClient {
    * 3. Submits a deposit transaction (token transfer + commitment append).
    */
   async deposit(amount: bigint, tokenMint: PublicKey): Promise<DepositResult> {
-    const note = this.wallet.createDepositNote(amount);
-    const commitment = this.wallet.computeCommitment(note);
+    const note = await this.wallet.createDepositNote(amount);
+    const commitment = await this.wallet.computeCommitment(note);
 
     // Build the deposit instruction (Anchor-compatible)
     const [poolPda] = PublicKey.findProgramAddressSync(
@@ -126,7 +140,7 @@ export class HolancClient {
     amount: bigint,
     fee: bigint = 0n,
   ): Promise<TransferResult> {
-    const { inputNotes, outputNotes } = this.wallet.prepareTransfer(
+    const { inputNotes, outputNotes } = await this.wallet.prepareTransfer(
       recipientOwner,
       amount,
       fee,
@@ -200,7 +214,7 @@ export class HolancClient {
     recipientTokenAccount: PublicKey,
     fee: bigint = 0n,
   ): Promise<WithdrawResult> {
-    const { inputNotes, outputNotes } = this.wallet.prepareWithdraw(
+    const { inputNotes, outputNotes } = await this.wallet.prepareWithdraw(
       amount,
       fee,
     );
@@ -411,7 +425,7 @@ export class HolancClient {
   private serializeProof(proof: any): Buffer {
     // Serialize Groth16 proof to fixed-size bytes: pi_a (64) + pi_b (128) + pi_c (64) = 256
     const parts: Buffer[] = [];
-    for (const val of proof.pi_a) {
+    for (const val of proof.piA) {
       const buf = Buffer.alloc(32);
       const bi = BigInt(val);
       for (let i = 0; i < 32; i++) {
@@ -419,7 +433,7 @@ export class HolancClient {
       }
       parts.push(buf);
     }
-    for (const pair of proof.pi_b) {
+    for (const pair of proof.piB) {
       for (const val of pair) {
         const buf = Buffer.alloc(32);
         const bi = BigInt(val);
@@ -429,7 +443,7 @@ export class HolancClient {
         parts.push(buf);
       }
     }
-    for (const val of proof.pi_c) {
+    for (const val of proof.piC) {
       const buf = Buffer.alloc(32);
       const bi = BigInt(val);
       for (let i = 0; i < 32; i++) {

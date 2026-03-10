@@ -58,16 +58,16 @@ export async function encryptNote(
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    aesKey,
+    aesKey as BufferSource,
     "AES-GCM",
     false,
     ["encrypt"],
   );
 
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
+    { name: "AES-GCM", iv: iv as BufferSource, tagLength: TAG_LENGTH * 8 },
     cryptoKey,
-    ptBytes,
+    ptBytes as BufferSource,
   );
 
   // Concatenate IV || ciphertext+tag
@@ -105,16 +105,16 @@ export async function decryptNote(
 
     const cryptoKey = await crypto.subtle.importKey(
       "raw",
-      aesKey,
+      aesKey as BufferSource,
       "AES-GCM",
       false,
       ["decrypt"],
     );
 
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
+      { name: "AES-GCM", iv: iv as BufferSource, tagLength: TAG_LENGTH * 8 },
       cryptoKey,
-      ct,
+      ct as BufferSource,
     );
 
     return decodePlaintext(new Uint8Array(decrypted));
@@ -163,16 +163,20 @@ async function deriveSharedSecret(
 
 /** HKDF-SHA256 key derivation. */
 async function hkdfDeriveKey(ikm: Uint8Array): Promise<Uint8Array> {
-  const baseKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, [
-    "deriveBits",
-  ]);
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    ikm as BufferSource,
+    "HKDF",
+    false,
+    ["deriveBits"],
+  );
 
   const derivedBits = await crypto.subtle.deriveBits(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(32), // zero salt for deterministic testing
-      info: HKDF_INFO,
+      salt: new Uint8Array(32) as BufferSource, // zero salt for deterministic testing
+      info: HKDF_INFO as BufferSource,
     },
     baseKey,
     256,

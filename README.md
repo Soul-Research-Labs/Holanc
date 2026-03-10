@@ -8,8 +8,8 @@ Holanc combines the privacy middleware patterns of [ZAseon](https://github.com/S
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                  Client (TypeScript/Rust)                     │
-│  wallet • note management • proof generation • stealth addr  │
+│                  Client (TypeScript/Rust)                   │
+│  wallet • note management • proof generation • stealth addr │
 └────────────┬────────────────────┬───────────────────────────┘
              │                    │
    ┌─────────▼──────┐   ┌───────▼────────┐   ┌──────────────┐

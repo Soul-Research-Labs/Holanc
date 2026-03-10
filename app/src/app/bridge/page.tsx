@@ -4,6 +4,7 @@ import { Header } from "@/components/Header";
 import { PageShell, AmountInput, ProofStatus } from "@/components/shared";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
+import { useHolanc } from "@/hooks/useHolanc";
 
 const CHAINS = [
   { id: 1, name: "Solana", icon: "◎" },
@@ -13,34 +14,26 @@ const CHAINS = [
 
 export default function BridgePage() {
   const { connected } = useWallet();
+  const holanc = useHolanc();
   const [sourceChain, setSourceChain] = useState(1);
   const [destChain, setDestChain] = useState(2);
   const [amount, setAmount] = useState("");
   const [noteSecret, setNoteSecret] = useState("");
-  const [status, setStatus] = useState<
-    "idle" | "generating" | "done" | "error"
-  >("idle");
-  const [step, setStep] = useState("");
 
   const handleBridge = async () => {
     if (!noteSecret.trim() || !amount) return;
-    setStatus("generating");
-
-    setStep("Generating lock proof on source chain…");
-    await new Promise((r) => setTimeout(r, 2000));
-
-    setStep("Submitting lock transaction…");
-    await new Promise((r) => setTimeout(r, 1500));
-
-    setStep("Waiting for Wormhole VAA relay…");
-    await new Promise((r) => setTimeout(r, 2000));
-
-    setStep("Minting commitment on destination chain…");
-    await new Promise((r) => setTimeout(r, 1500));
-
-    setStep("");
-    setStatus("done");
+    await holanc.bridgeTransfer(
+      sourceChain,
+      destChain,
+      noteSecret.trim(),
+      parseFloat(amount),
+    );
   };
+
+  const isBusy =
+    holanc.status === "generating" ||
+    holanc.status === "sending" ||
+    holanc.status === "confirming";
 
   return (
     <>
@@ -106,18 +99,18 @@ export default function BridgePage() {
 
           <ProofStatus
             status={
-              status === "generating"
+              isBusy
                 ? "generating"
-                : status === "done"
+                : holanc.status === "done"
                 ? "done"
-                : status === "error"
+                : holanc.status === "error"
                 ? "error"
                 : "idle"
             }
-            message={step || undefined}
+            message={isBusy ? "Processing bridge transfer…" : undefined}
           />
 
-          {status === "done" && (
+          {holanc.status === "done" && (
             <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm dark:border-green-800 dark:bg-green-900/20">
               <span className="font-medium text-green-700 dark:text-green-300">
                 Bridge transfer complete!
@@ -132,25 +125,19 @@ export default function BridgePage() {
 
           <button
             className="btn-primary w-full"
-            disabled={
-              !connected ||
-              !noteSecret.trim() ||
-              !amount ||
-              status === "generating"
-            }
+            disabled={!connected || !noteSecret.trim() || !amount || isBusy}
             onClick={handleBridge}
           >
-            {status === "generating"
+            {isBusy
               ? "Bridging…"
               : `Bridge to ${CHAINS.find((c) => c.id === destChain)?.name}`}
           </button>
 
-          {status === "done" && (
+          {holanc.status === "done" && (
             <button
               className="btn-secondary w-full"
               onClick={() => {
-                setStatus("idle");
-                setStep("");
+                holanc.reset();
               }}
             >
               New Bridge Transfer

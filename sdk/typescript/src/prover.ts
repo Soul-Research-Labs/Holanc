@@ -1,11 +1,11 @@
 import { Note, Groth16Proof, Hash32, TransferV2Params } from "./types";
 
-// snarkjs is loaded dynamically to support both Node and browser
-let snarkjs: typeof import("snarkjs") | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let snarkjs: any = null;
 
 async function loadSnarkjs() {
   if (!snarkjs) {
-    snarkjs = await import("snarkjs");
+    snarkjs = await import(/* webpackIgnore: true */ "snarkjs");
   }
   return snarkjs;
 }
@@ -209,7 +209,7 @@ export class HolancProver {
 
   private async prove(
     circuitName: string,
-    input: Record<string, string | string[]>,
+    input: Record<string, unknown>,
   ): Promise<ProveResult> {
     const snarks = await loadSnarkjs();
     const wasmPath = `${this.circuitDir}/${circuitName}/${circuitName}_js/${circuitName}.wasm`;
@@ -223,12 +223,12 @@ export class HolancProver {
 
     return {
       proof: {
-        pi_a: proof.pi_a.slice(0, 2) as [string, string],
-        pi_b: proof.pi_b.slice(0, 2).map((p: string[]) => p.slice(0, 2)) as [
+        piA: proof.pi_a.slice(0, 2) as [string, string],
+        piB: proof.pi_b.slice(0, 2).map((p: string[]) => p.slice(0, 2)) as [
           [string, string],
           [string, string],
         ],
-        pi_c: proof.pi_c.slice(0, 2) as [string, string],
+        piC: proof.pi_c.slice(0, 2) as [string, string],
         protocol: "groth16",
         curve: "bn128",
       },
@@ -238,7 +238,7 @@ export class HolancProver {
 
   private buildTransferInput(
     params: TransferProveParams,
-  ): Record<string, string | string[]> {
+  ): Record<string, unknown> {
     const { spendingKey, inputNotes, outputNotes, fee } = params;
     // Pad to exactly 2 inputs
     const inputs = padNotes(inputNotes, 2);
@@ -262,7 +262,7 @@ export class HolancProver {
 
   private buildWithdrawInput(
     params: WithdrawProveParams,
-  ): Record<string, string | string[]> {
+  ): Record<string, unknown> {
     const base = this.buildTransferInput({
       ...params,
     });
@@ -274,7 +274,7 @@ export class HolancProver {
 
   private buildTransfer4x4Input(
     params: Transfer4x4ProveParams,
-  ): Record<string, string | string[]> {
+  ): Record<string, unknown> {
     const { spendingKey, inputNotes, outputNotes, fee, hasInput, hasOutput } =
       params;
     const inputs = padNotes(inputNotes, 4);

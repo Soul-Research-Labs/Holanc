@@ -4,36 +4,64 @@ import { Header } from "@/components/Header";
 import { PageShell, AmountInput, ProofStatus } from "@/components/shared";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
+import { useHolanc } from "@/hooks/useHolanc";
 
 type StealthMode = "send" | "scan";
 
 export default function StealthPage() {
   const { connected, publicKey } = useWallet();
+  const holanc = useHolanc();
   const [mode, setMode] = useState<StealthMode>("send");
   const [metaAddress, setMetaAddress] = useState("");
   const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState<
-    "idle" | "generating" | "done" | "error"
-  >("idle");
   const [result, setResult] = useState<string | null>(null);
 
   const handleSend = async () => {
     if (!metaAddress.trim() || !amount) return;
-    setStatus("generating");
-    // Simulated stealth send
-    await new Promise((r) => setTimeout(r, 2500));
-    setResult(`Stealth payment sent. Ephemeral pubkey published on-chain.`);
-    setStatus("done");
+    setResult(null);
+    const sendResult = await holanc.stealthSendTo(
+      metaAddress.trim(),
+      parseFloat(amount),
+    );
+    if (sendResult) {
+      setResult(
+        `Stealth payment sent! Ephemeral pubkey: ${sendResult.ephemeralPubkey.slice(
+          0,
+          16,
+        )}… Stealth owner: ${sendResult.stealthOwner.slice(0, 16)}…`,
+      );
+    }
   };
 
   const handleScan = async () => {
-    setStatus("generating");
-    await new Promise((r) => setTimeout(r, 2000));
-    setResult(
-      "Scan complete. No incoming stealth payments found for this wallet.",
-    );
-    setStatus("done");
+    setResult(null);
+    const results = await holanc.stealthScanIncoming();
+    if (results.length > 0) {
+      setResult(`Found ${results.length} incoming stealth payment(s).`);
+    } else {
+      setResult(
+        "Scan complete. No incoming stealth payments found for this wallet.",
+      );
+    }
   };
+
+  const isBusy =
+    holanc.status === "generating" ||
+    holanc.status === "sending" ||
+    holanc.status === "confirming";
+  const proofStatus = isBusy
+    ? ("generating" as const)
+    : holanc.status === "done"
+    ? ("done" as const)
+    : holanc.status === "error"
+    ? ("error" as const)
+    : ("idle" as const);
+  const proofMessage =
+    holanc.status === "sending"
+      ? "Sending transaction…"
+      : holanc.status === "confirming"
+      ? "Confirming…"
+      : holanc.error || undefined;
 
   return (
     <>
@@ -47,7 +75,7 @@ export default function StealthPage() {
             className={mode === "send" ? "btn-primary" : "btn-secondary"}
             onClick={() => {
               setMode("send");
-              setStatus("idle");
+              holanc.reset();
               setResult(null);
             }}
           >
@@ -57,7 +85,7 @@ export default function StealthPage() {
             className={mode === "scan" ? "btn-primary" : "btn-secondary"}
             onClick={() => {
               setMode("scan");
-              setStatus("idle");
+              holanc.reset();
               setResult(null);
             }}
           >
@@ -84,19 +112,14 @@ export default function StealthPage() {
             </div>
 
             <AmountInput value={amount} onChange={setAmount} />
-            <ProofStatus status={status} />
+            <ProofStatus status={proofStatus} message={proofMessage} />
 
             <button
               className="btn-primary w-full"
-              disabled={
-                !connected ||
-                !metaAddress.trim() ||
-                !amount ||
-                status === "generating"
-              }
+              disabled={!connected || !metaAddress.trim() || !amount || isBusy}
               onClick={handleSend}
             >
-              {status === "generating"
+              {isBusy
                 ? "Generating Stealth Proof…"
                 : "Send via Stealth Address"}
             </button>
@@ -116,14 +139,14 @@ export default function StealthPage() {
               </div>
             )}
 
-            <ProofStatus status={status} />
+            <ProofStatus status={proofStatus} message={proofMessage} />
 
             <button
               className="btn-primary w-full"
-              disabled={!connected || status === "generating"}
+              disabled={!connected || isBusy}
               onClick={handleScan}
             >
-              {status === "generating" ? "Scanning…" : "Scan for Payments"}
+              {isBusy ? "Scanning…" : "Scan for Payments"}
             </button>
           </div>
         )}

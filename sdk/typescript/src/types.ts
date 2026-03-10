@@ -41,7 +41,8 @@ export interface Groth16Proof {
   piA: [string, string];
   piB: [[string, string], [string, string]];
   piC: [string, string];
-  publicSignals: string[];
+  protocol?: string;
+  curve?: string;
 }
 
 /** Pool status information. */

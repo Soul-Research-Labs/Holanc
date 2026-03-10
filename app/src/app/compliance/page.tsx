@@ -4,15 +4,14 @@ import { Header } from "@/components/Header";
 import { PageShell, ProofStatus } from "@/components/shared";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
+import { useHolanc } from "@/hooks/useHolanc";
 
 type ComplianceTab = "disclosure" | "wealth" | "oracle";
 
 export default function CompliancePage() {
   const { connected, publicKey } = useWallet();
+  const holanc = useHolanc();
   const [tab, setTab] = useState<ComplianceTab>("disclosure");
-  const [status, setStatus] = useState<
-    "idle" | "generating" | "done" | "error"
-  >("idle");
   const [result, setResult] = useState<string | null>(null);
 
   // Disclosure state
@@ -24,26 +23,48 @@ export default function CompliancePage() {
 
   const handleDisclose = async () => {
     if (!noteSecret.trim() || !oracleAddress.trim()) return;
-    setStatus("generating");
     setResult(null);
-    await new Promise((r) => setTimeout(r, 2000));
-    setResult(
-      "Viewing key disclosed to oracle. The oracle can now verify your transaction history for this note.",
+    const sig = await holanc.discloseToOracle(
+      noteSecret.trim(),
+      oracleAddress.trim(),
     );
-    setStatus("done");
+    if (sig) {
+      setResult(`Viewing key disclosed to oracle. Tx: ${sig.slice(0, 16)}…`);
+    }
   };
 
   const handleWealthProof = async () => {
     const t = parseFloat(threshold);
     if (isNaN(t) || t <= 0) return;
-    setStatus("generating");
     setResult(null);
-    await new Promise((r) => setTimeout(r, 3000));
-    setResult(
-      `ZK wealth proof generated! Proves shielded balance ≥ ${t} SOL without revealing exact amount. Attestation stored on-chain.`,
-    );
-    setStatus("done");
+    const sig = await holanc.generateWealthProof(t);
+    if (sig) {
+      setResult(
+        `ZK wealth proof generated! Proves shielded balance ≥ ${t} SOL without revealing exact amount. Tx: ${sig.slice(
+          0,
+          16,
+        )}…`,
+      );
+    }
   };
+
+  const isBusy =
+    holanc.status === "generating" ||
+    holanc.status === "sending" ||
+    holanc.status === "confirming";
+  const proofStatus = isBusy
+    ? ("generating" as const)
+    : holanc.status === "done"
+    ? ("done" as const)
+    : holanc.status === "error"
+    ? ("error" as const)
+    : ("idle" as const);
+  const proofMessage =
+    holanc.status === "sending"
+      ? "Sending transaction…"
+      : holanc.status === "confirming"
+      ? "Confirming…"
+      : holanc.error || undefined;
 
   const tabs: { key: ComplianceTab; label: string }[] = [
     { key: "disclosure", label: "Selective Disclosure" },
@@ -65,7 +86,7 @@ export default function CompliancePage() {
               className={tab === t.key ? "btn-primary" : "btn-secondary"}
               onClick={() => {
                 setTab(t.key);
-                setStatus("idle");
+                holanc.reset();
                 setResult(null);
               }}
             >
@@ -106,7 +127,7 @@ export default function CompliancePage() {
               />
             </div>
 
-            <ProofStatus status={status} />
+            <ProofStatus status={proofStatus} message={proofMessage} />
 
             <button
               className="btn-primary w-full"
@@ -114,13 +135,11 @@ export default function CompliancePage() {
                 !connected ||
                 !noteSecret.trim() ||
                 !oracleAddress.trim() ||
-                status === "generating"
+                isBusy
               }
               onClick={handleDisclose}
             >
-              {status === "generating"
-                ? "Encrypting Disclosure…"
-                : "Disclose to Oracle"}
+              {isBusy ? "Encrypting Disclosure…" : "Disclose to Oracle"}
             </button>
           </div>
         )}
@@ -153,21 +172,16 @@ export default function CompliancePage() {
               </p>
             </div>
 
-            <ProofStatus status={status} />
+            <ProofStatus status={proofStatus} message={proofMessage} />
 
             <button
               className="btn-primary w-full"
               disabled={
-                !connected ||
-                !threshold ||
-                parseFloat(threshold) <= 0 ||
-                status === "generating"
+                !connected || !threshold || parseFloat(threshold) <= 0 || isBusy
               }
               onClick={handleWealthProof}
             >
-              {status === "generating"
-                ? "Generating Wealth Proof…"
-                : "Generate Wealth Proof"}
+              {isBusy ? "Generating Wealth Proof…" : "Generate Wealth Proof"}
             </button>
           </div>
         )}

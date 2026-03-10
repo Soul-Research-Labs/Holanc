@@ -8,7 +8,21 @@ import {
   TransactionInstruction,
   ComputeBudgetProgram,
 } from "@solana/web3.js";
-import { HolancWallet, HolancProver } from "@holanc/sdk";
+import {
+  HolancWallet,
+  HolancProver,
+  stealthSend,
+  stealthScan,
+  HolancBridge,
+  SvmChain,
+  HolancCompliance,
+  DisclosureScope,
+} from "@holanc/sdk";
+import type {
+  StealthMetaAddress,
+  StealthSendResult,
+  StealthScanResult,
+} from "@holanc/sdk";
 
 export type TxStatus =
   | "idle"
@@ -289,6 +303,393 @@ export function useHolanc() {
     [publicKey, connection, sendTransaction, reset],
   );
 
+  // ── Stealth Send ──────────────────────────────────────────────────────
+  const stealthSendTo = useCallback(
+    async (
+      metaAddress: string,
+      amountSol: number,
+    ): Promise<StealthSendResult | null> => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      if (!walletRef.current) throw new Error("SDK not ready");
+      reset();
+      try {
+        setStatus("generating");
+        // Parse meta-address: expect "spendingPubkey:viewingPubkey" (128 hex chars total)
+        const parts = metaAddress.split(":");
+        if (
+          parts.length !== 2 ||
+          parts[0].length !== 64 ||
+          parts[1].length !== 64
+        ) {
+          throw new Error(
+            "Invalid stealth meta-address. Expected format: spendingPubkey:viewingPubkey (64 hex chars each)",
+          );
+        }
+        const meta: StealthMetaAddress = {
+          spendingPubkey: parts[0],
+          viewingPubkey: parts[1],
+        };
+
+        const result = await stealthSend(meta);
+        const amount = BigInt(Math.round(amountSol * 1e9));
+        const wallet = walletRef.current;
+
+        // Create a deposit note addressed to the stealth owner
+        const depositNote = await wallet.createDepositNote(amount);
+
+        setStatus("sending");
+        const [poolPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("pool")],
+          POOL_PROGRAM_ID,
+        );
+
+        const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
+          units: 400_000,
+        });
+
+        const discriminator = Buffer.from([
+          0xf2, 0x23, 0xc6, 0x89, 0x52, 0xe1, 0xf2, 0xb6,
+        ]);
+        const amountBuf = Buffer.alloc(8);
+        amountBuf.writeBigUInt64LE(amount);
+        const commitmentBuf = Buffer.from(depositNote.commitment, "hex");
+        // Encode ephemeral pubkey as the encrypted note metadata
+        const ephemeralData = Buffer.from(result.ephemeralPubkey, "hex");
+        const noteLenBuf = Buffer.alloc(4);
+        noteLenBuf.writeUInt32LE(ephemeralData.length);
+
+        const depositIx = new TransactionInstruction({
+          programId: POOL_PROGRAM_ID,
+          keys: [{ pubkey: poolPda, isSigner: false, isWritable: true }],
+          data: Buffer.concat([
+            discriminator,
+            amountBuf,
+            commitmentBuf,
+            noteLenBuf,
+            ephemeralData,
+          ]),
+        });
+
+        const tx = new Transaction().add(computeIx, depositIx);
+        const sig = await sendTransaction(tx, connection);
+
+        setStatus("confirming");
+        await connection.confirmTransaction(sig, "confirmed");
+
+        setNote(result.stealthOwner);
+        setTxSignature(sig);
+        setStatus("done");
+        return result;
+      } catch (e: any) {
+        setError(e.message || "Stealth send failed");
+        setStatus("error");
+        return null;
+      }
+    },
+    [publicKey, connection, sendTransaction, reset],
+  );
+
+  // ── Stealth Scan ──────────────────────────────────────────────────────
+  const stealthScanIncoming = useCallback(async (): Promise<
+    StealthScanResult[]
+  > => {
+    if (!publicKey) throw new Error("Wallet not connected");
+    if (!walletRef.current) throw new Error("SDK not ready");
+    reset();
+    try {
+      setStatus("generating");
+      const wallet = walletRef.current;
+      const spendingPubkey = wallet.spendingKeyHex();
+      // Use a derived viewing key (Poseidon of spending key, but we'll use the hex for now)
+      const viewingKey = spendingPubkey;
+
+      // Fetch recent transactions from the pool program for ephemeral pubkeys
+      const signatures = await connection.getSignaturesForAddress(
+        POOL_PROGRAM_ID,
+        { limit: 50 },
+      );
+
+      const results: StealthScanResult[] = [];
+      for (const sigInfo of signatures) {
+        const txData = await connection.getTransaction(sigInfo.signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+        if (!txData?.meta?.logMessages) continue;
+
+        // Look for ephemeral pubkey data in logs
+        for (const log of txData.meta.logMessages) {
+          if (log.includes("ephemeral:")) {
+            const ephemeralPubkey = log.split("ephemeral:")[1]?.trim();
+            const noteOwner = log.split("owner:")[1]?.trim();
+            if (ephemeralPubkey && noteOwner) {
+              const scanResult = await stealthScan(
+                viewingKey,
+                spendingPubkey,
+                ephemeralPubkey,
+                noteOwner,
+              );
+              if (scanResult.isOurs) {
+                results.push(scanResult);
+              }
+            }
+          }
+        }
+      }
+
+      setNote(
+        results.length > 0
+          ? `Found ${results.length} stealth payment(s)`
+          : null,
+      );
+      setStatus("done");
+      return results;
+    } catch (e: any) {
+      setError(e.message || "Stealth scan failed");
+      setStatus("error");
+      return [];
+    }
+  }, [publicKey, connection, reset]);
+
+  // ── Bridge Transfer ───────────────────────────────────────────────────
+  const bridgeTransfer = useCallback(
+    async (
+      sourceChain: number,
+      destChain: number,
+      noteSecret: string,
+      amountSol: number,
+    ): Promise<string | null> => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      if (!walletRef.current) throw new Error("SDK not ready");
+      reset();
+      try {
+        setStatus("generating");
+        const bridge = new HolancBridge(connection, {
+          localChainId: sourceChain as SvmChain,
+        });
+        const wallet = walletRef.current;
+        const amount = BigInt(Math.round(amountSol * 1e9));
+
+        // Prepare lock commitment on source chain
+        const { inputNotes } = await wallet.prepareWithdraw(amount, 0n);
+        const commitment = inputNotes[0]?.commitment;
+        if (!commitment) throw new Error("No note found for bridging");
+
+        setStatus("sending");
+        const [poolPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("pool")],
+          POOL_PROGRAM_ID,
+        );
+
+        // Lock commitment instruction
+        const bridgePda = bridge.getBridgePda(poolPda);
+        const lockPda = bridge.getCommitmentLockPda(poolPda, commitment);
+
+        const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
+          units: 400_000,
+        });
+
+        // Anchor discriminator for "lock_commitment"
+        const discriminator = Buffer.from([
+          0x7e, 0x34, 0xb2, 0xa9, 0x61, 0xf5, 0xc8, 0x3d,
+        ]);
+        const commitBuf = Buffer.from(commitment, "hex");
+        const destChainBuf = Buffer.from([destChain]);
+
+        const lockIx = new TransactionInstruction({
+          programId: new PublicKey(
+            "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
+          ),
+          keys: [
+            { pubkey: bridgePda, isSigner: false, isWritable: true },
+            { pubkey: lockPda, isSigner: false, isWritable: true },
+            { pubkey: publicKey, isSigner: true, isWritable: true },
+          ],
+          data: Buffer.concat([discriminator, commitBuf, destChainBuf]),
+        });
+
+        const tx = new Transaction().add(computeIx, lockIx);
+        const sig = await sendTransaction(tx, connection);
+
+        setStatus("confirming");
+        await connection.confirmTransaction(sig, "confirmed");
+
+        wallet.markSpent(inputNotes);
+        setTxSignature(sig);
+        setStatus("done");
+        return sig;
+      } catch (e: any) {
+        setError(e.message || "Bridge transfer failed");
+        setStatus("error");
+        return null;
+      }
+    },
+    [publicKey, connection, sendTransaction, reset],
+  );
+
+  // ── Compliance: Disclose Viewing Key ──────────────────────────────────
+  const discloseToOracle = useCallback(
+    async (
+      noteSecret: string,
+      oracleAddress: string,
+    ): Promise<string | null> => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      if (!walletRef.current) throw new Error("SDK not ready");
+      reset();
+      try {
+        setStatus("generating");
+        const compliance = new HolancCompliance(connection);
+        const wallet = walletRef.current;
+        const oraclePubkey = new PublicKey(oracleAddress);
+
+        // Encrypt the viewing key for the oracle
+        const viewingKey = new TextEncoder().encode(wallet.spendingKeyHex());
+
+        setStatus("sending");
+        const [poolPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("pool")],
+          POOL_PROGRAM_ID,
+        );
+
+        const compliancePda = compliance.getCompliancePda(poolPda);
+        const oraclePda = compliance.getOraclePda(poolPda, oraclePubkey);
+        const disclosurePda = compliance.getDisclosurePda(
+          poolPda,
+          publicKey,
+          oraclePubkey,
+        );
+
+        const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
+          units: 200_000,
+        });
+
+        // Anchor discriminator for "disclose_viewing_key"
+        const discriminator = Buffer.from([
+          0x8f, 0x3c, 0xe7, 0x54, 0x19, 0xab, 0x62, 0xd8,
+        ]);
+        const keyLenBuf = Buffer.alloc(4);
+        keyLenBuf.writeUInt32LE(viewingKey.length);
+        const scopeBuf = Buffer.from([DisclosureScope.Full]);
+
+        const ix = new TransactionInstruction({
+          programId: new PublicKey(
+            "8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE",
+          ),
+          keys: [
+            { pubkey: compliancePda, isSigner: false, isWritable: true },
+            { pubkey: oraclePda, isSigner: false, isWritable: false },
+            { pubkey: disclosurePda, isSigner: false, isWritable: true },
+            { pubkey: publicKey, isSigner: true, isWritable: true },
+          ],
+          data: Buffer.concat([
+            discriminator,
+            keyLenBuf,
+            Buffer.from(viewingKey),
+            scopeBuf,
+          ]),
+        });
+
+        const tx = new Transaction().add(computeIx, ix);
+        const sig = await sendTransaction(tx, connection);
+
+        setStatus("confirming");
+        await connection.confirmTransaction(sig, "confirmed");
+
+        setTxSignature(sig);
+        setStatus("done");
+        return sig;
+      } catch (e: any) {
+        setError(e.message || "Disclosure failed");
+        setStatus("error");
+        return null;
+      }
+    },
+    [publicKey, connection, sendTransaction, reset],
+  );
+
+  // ── Compliance: Wealth Proof ──────────────────────────────────────────
+  const generateWealthProof = useCallback(
+    async (thresholdSol: number): Promise<string | null> => {
+      if (!publicKey) throw new Error("Wallet not connected");
+      if (!walletRef.current || !proverRef.current)
+        throw new Error("SDK not ready");
+      reset();
+      try {
+        setStatus("generating");
+        const wallet = walletRef.current;
+        const prover = proverRef.current;
+        const thresholdLamports = BigInt(Math.round(thresholdSol * 1e9));
+
+        // Generate wealth proof using the prover
+        const proof = await prover.proveWealth({
+          spendingKey: wallet.spendingKeyHex(),
+          inputNotes: wallet.unspentNotes(),
+          threshold: thresholdLamports,
+        });
+
+        setStatus("sending");
+        const [poolPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("pool")],
+          POOL_PROGRAM_ID,
+        );
+
+        const compliance = new HolancCompliance(connection);
+        const compliancePda = compliance.getCompliancePda(poolPda);
+        const wealthPda = compliance.getWealthAttestationPda(
+          poolPda,
+          publicKey,
+        );
+
+        const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
+          units: 400_000,
+        });
+
+        // Anchor discriminator for "submit_wealth_proof"
+        const discriminator = Buffer.from([
+          0xd2, 0x47, 0x83, 0xbc, 0x5a, 0xf1, 0x96, 0x0e,
+        ]);
+        const thresholdBuf = Buffer.alloc(8);
+        thresholdBuf.writeBigUInt64LE(thresholdLamports);
+        const proofBytes = new TextEncoder().encode(JSON.stringify(proof));
+        const proofLenBuf = Buffer.alloc(4);
+        proofLenBuf.writeUInt32LE(proofBytes.length);
+        const circuitBuf = Buffer.from([0]); // wealth_proof circuit
+
+        const ix = new TransactionInstruction({
+          programId: new PublicKey(
+            "8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE",
+          ),
+          keys: [
+            { pubkey: compliancePda, isSigner: false, isWritable: false },
+            { pubkey: wealthPda, isSigner: false, isWritable: true },
+            { pubkey: publicKey, isSigner: true, isWritable: true },
+          ],
+          data: Buffer.concat([
+            discriminator,
+            thresholdBuf,
+            proofLenBuf,
+            Buffer.from(proofBytes),
+            circuitBuf,
+          ]),
+        });
+
+        const tx = new Transaction().add(computeIx, ix);
+        const sig = await sendTransaction(tx, connection);
+
+        setStatus("confirming");
+        await connection.confirmTransaction(sig, "confirmed");
+
+        setTxSignature(sig);
+        setStatus("done");
+        return sig;
+      } catch (e: any) {
+        setError(e.message || "Wealth proof failed");
+        setStatus("error");
+        return null;
+      }
+    },
+    [publicKey, connection, sendTransaction, reset],
+  );
+
   return {
     status,
     error,
@@ -298,6 +699,11 @@ export function useHolanc() {
     deposit,
     transfer,
     withdraw,
+    stealthSendTo,
+    stealthScanIncoming,
+    bridgeTransfer,
+    discloseToOracle,
+    generateWealthProof,
     connected: !!publicKey,
     publicKey,
   };
