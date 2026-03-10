@@ -1,5 +1,11 @@
 import * as bip39 from "bip39";
 import { Hash32, Note } from "./types";
+import {
+  poseidonHash,
+  poseidonHashHex,
+  hexToField,
+  fieldToHex,
+} from "./poseidon";
 
 interface TxRecord {
   kind: "deposit" | "send" | "withdraw";
@@ -22,39 +28,51 @@ export class HolancWallet {
 
   private constructor(spendingKey: Uint8Array) {
     this.spendingKey = spendingKey;
-    this.viewingKey = "0".repeat(64); // Derived via Poseidon at init
+    this.viewingKey = "0".repeat(64); // Initialized async via initViewingKey()
     this.notes = [];
     this.txHistory = [];
     this.nextBlinding = 0;
   }
 
+  /** Initialize the viewing key (must be called after construction). */
+  private async initViewingKey(): Promise<void> {
+    this.viewingKey = await poseidonHashHex([
+      hexToField(this.spendingKeyHex()),
+    ]);
+  }
+
   /** Create wallet from BIP-39 mnemonic. */
-  static fromMnemonic(mnemonic: string): HolancWallet {
+  static async fromMnemonic(mnemonic: string): Promise<HolancWallet> {
     if (!bip39.validateMnemonic(mnemonic)) {
       throw new Error("Invalid mnemonic");
     }
     const seed = bip39.mnemonicToSeedSync(mnemonic);
-    // Use first 32 bytes of seed as spending key
-    return new HolancWallet(seed.slice(0, 32));
+    const wallet = new HolancWallet(seed.slice(0, 32));
+    await wallet.initViewingKey();
+    return wallet;
   }
 
   /** Create wallet with a random mnemonic. Returns [wallet, mnemonic]. */
-  static generate(): [HolancWallet, string] {
+  static async generate(): Promise<[HolancWallet, string]> {
     const mnemonic = bip39.generateMnemonic(128); // 12 words
-    return [HolancWallet.fromMnemonic(mnemonic), mnemonic];
+    return [await HolancWallet.fromMnemonic(mnemonic), mnemonic];
   }
 
   /** Create wallet from a raw 32-byte spending key. */
-  static fromKey(key: Uint8Array): HolancWallet {
+  static async fromKey(key: Uint8Array): Promise<HolancWallet> {
     if (key.length !== 32) throw new Error("Spending key must be 32 bytes");
-    return new HolancWallet(key);
+    const wallet = new HolancWallet(key);
+    await wallet.initViewingKey();
+    return wallet;
   }
 
   /** Create wallet with random key (no mnemonic backup). */
-  static random(): HolancWallet {
+  static async random(): Promise<HolancWallet> {
     const key = new Uint8Array(32);
     crypto.getRandomValues(key);
-    return new HolancWallet(key);
+    const wallet = new HolancWallet(key);
+    await wallet.initViewingKey();
+    return wallet;
   }
 
   /** Hex-encoded spending key (for proof generation). */
@@ -80,19 +98,19 @@ export class HolancWallet {
   }
 
   /** Create a new deposit note for the given amount. */
-  createDepositNote(amount: bigint): Note {
-    const blinding = this.deriveBlinding();
+  async createDepositNote(amount: bigint): Promise<Note> {
+    const blinding = await this.deriveBlinding();
     const note: Note = {
       owner: this.spendingKeyHex(),
       value: amount,
       assetId: "0".repeat(64), // SOL default
       blinding,
-      commitment: "", // Computed after
+      commitment: "",
       nullifier: "",
       spent: false,
     };
-    note.commitment = this.computeCommitment(note);
-    note.nullifier = this.computeNullifier(note);
+    note.commitment = await this.computeCommitment(note);
+    note.nullifier = await this.computeNullifier(note);
     this.notes.push(note);
     this.txHistory.push({
       kind: "deposit",
@@ -103,17 +121,21 @@ export class HolancWallet {
   }
 
   /** Compute note commitment: Poseidon(owner, value, asset_id, blinding). */
-  computeCommitment(note: Note): Hash32 {
-    // Simplified - actual implementation uses circomlibjs Poseidon
-    // This is a placeholder that will be replaced with real Poseidon hash
-    const data = `${note.owner}${note.value}${note.assetId}${note.blinding}`;
-    return sha256Hex(data);
+  async computeCommitment(note: Note): Promise<Hash32> {
+    return poseidonHashHex([
+      hexToField(note.owner),
+      note.value,
+      hexToField(note.assetId),
+      hexToField(note.blinding),
+    ]);
   }
 
   /** Compute nullifier: Poseidon(spending_key, commitment). */
-  private computeNullifier(note: Note): Hash32 {
-    const data = `${this.spendingKeyHex()}${note.commitment}`;
-    return sha256Hex(data);
+  private async computeNullifier(note: Note): Promise<Hash32> {
+    return poseidonHashHex([
+      hexToField(this.spendingKeyHex()),
+      hexToField(note.commitment),
+    ]);
   }
 
   /** Select notes covering an amount. Greedy largest-first, max 2 inputs. */
@@ -141,11 +163,11 @@ export class HolancWallet {
   }
 
   /** Prepare notes for a transfer. Returns input + output note sets. */
-  prepareTransfer(
+  async prepareTransfer(
     recipientOwner: Hash32,
     amount: bigint,
     fee: bigint,
-  ): { inputNotes: Note[]; outputNotes: Note[] } {
+  ): Promise<{ inputNotes: Note[]; outputNotes: Note[] }> {
     const total = amount + fee;
     const inputNotes = this.selectNotes(total);
     const inputSum = inputNotes.reduce((s, n) => s + n.value, 0n);
@@ -156,7 +178,7 @@ export class HolancWallet {
         owner: recipientOwner,
         value: amount,
         assetId: inputNotes[0].assetId,
-        blinding: this.deriveBlinding(),
+        blinding: await this.deriveBlinding(),
         commitment: "",
         nullifier: "",
         spent: false,
@@ -168,7 +190,7 @@ export class HolancWallet {
         owner: this.spendingKeyHex(),
         value: change,
         assetId: inputNotes[0].assetId,
-        blinding: this.deriveBlinding(),
+        blinding: await this.deriveBlinding(),
         commitment: "",
         nullifier: "",
         spent: false,
@@ -185,10 +207,10 @@ export class HolancWallet {
   }
 
   /** Prepare notes for a withdrawal. */
-  prepareWithdraw(
+  async prepareWithdraw(
     amount: bigint,
     fee: bigint,
-  ): { inputNotes: Note[]; outputNotes: Note[] } {
+  ): Promise<{ inputNotes: Note[]; outputNotes: Note[] }> {
     const total = amount + fee;
     const inputNotes = this.selectNotes(total);
     const inputSum = inputNotes.reduce((s, n) => s + n.value, 0n);
@@ -200,7 +222,7 @@ export class HolancWallet {
         owner: this.spendingKeyHex(),
         value: change,
         assetId: inputNotes[0].assetId,
-        blinding: this.deriveBlinding(),
+        blinding: await this.deriveBlinding(),
         commitment: "",
         nullifier: "",
         spent: false,
@@ -226,17 +248,8 @@ export class HolancWallet {
     }
   }
 
-  private deriveBlinding(): Hash32 {
+  private async deriveBlinding(): Promise<Hash32> {
     const idx = this.nextBlinding++;
-    const data = `${this.spendingKeyHex()}:blinding:${idx}`;
-    return sha256Hex(data);
+    return poseidonHashHex([hexToField(this.spendingKeyHex()), BigInt(idx)]);
   }
-}
-
-/** Simple SHA-256 hex digest (sync, uses Node crypto). */
-function sha256Hex(input: string): Hash32 {
-  // Use Web Crypto-compatible approach
-  // In practice this gets replaced with Poseidon at integration time
-  const { createHash } = require("crypto");
-  return createHash("sha256").update(input).digest("hex");
 }

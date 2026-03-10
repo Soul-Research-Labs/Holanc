@@ -1,4 +1,12 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  Keypair,
+  sendAndConfirmTransaction,
+  SystemProgram,
+} from "@solana/web3.js";
 
 /**
  * Compliance client for the Holanc privacy protocol.
@@ -192,5 +200,199 @@ export class HolancCompliance {
     if (!attestation.isValid) return false;
     const now = Math.floor(Date.now() / 1000);
     return now < attestation.expiresAt;
+  }
+
+  /**
+   * Register a compliance oracle (auditor/regulator).
+   */
+  async registerOracle(
+    payer: Keypair,
+    oraclePubkey: PublicKey,
+    oracleName: string,
+    permissions: {
+      canView: boolean;
+      canRequestWealthProof: boolean;
+      canFlag: boolean;
+    },
+  ): Promise<string> {
+    const compliancePda = this.getCompliancePda(this.config.poolAddress);
+    const oraclePda = this.getOraclePda(this.config.poolAddress, oraclePubkey);
+
+    // Anchor discriminator for "register_oracle"
+    const discriminator = Buffer.from([
+      0x6e, 0x2a, 0xf1, 0xc5, 0x83, 0xd9, 0x47, 0xb2,
+    ]);
+
+    // oracle_pubkey: Pubkey (32 bytes)
+    const oracleKeyBuf = oraclePubkey.toBuffer();
+
+    // oracle_name: [u8; 32]
+    const nameBuf = Buffer.alloc(32);
+    Buffer.from(oracleName).copy(
+      nameBuf,
+      0,
+      0,
+      Math.min(oracleName.length, 32),
+    );
+
+    // OraclePermissions struct: 3 bools
+    const permsBuf = Buffer.from([
+      permissions.canView ? 1 : 0,
+      permissions.canRequestWealthProof ? 1 : 0,
+      permissions.canFlag ? 1 : 0,
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: this.config.complianceProgramId,
+      keys: [
+        { pubkey: compliancePda, isSigner: false, isWritable: true },
+        { pubkey: oraclePda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([discriminator, oracleKeyBuf, nameBuf, permsBuf]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  /**
+   * Disclose a viewing key to a registered oracle.
+   */
+  async discloseViewingKey(
+    payer: Keypair,
+    oracle: PublicKey,
+    encryptedViewingKey: Uint8Array,
+    scope: DisclosureScope,
+  ): Promise<string> {
+    const compliancePda = this.getCompliancePda(this.config.poolAddress);
+    const oraclePda = this.getOraclePda(this.config.poolAddress, oracle);
+    const disclosurePda = this.getDisclosurePda(
+      this.config.poolAddress,
+      payer.publicKey,
+      oracle,
+    );
+
+    // Anchor discriminator for "disclose_viewing_key"
+    const discriminator = Buffer.from([
+      0x8f, 0x3c, 0xe7, 0x54, 0x19, 0xab, 0x62, 0xd8,
+    ]);
+
+    // Vec<u8> encoding for encrypted_viewing_key
+    const keyLenBuf = Buffer.alloc(4);
+    keyLenBuf.writeUInt32LE(encryptedViewingKey.length);
+
+    // DisclosureScope enum serialization
+    const scopeBuf = this.serializeDisclosureScope(scope);
+
+    const ix = new TransactionInstruction({
+      programId: this.config.complianceProgramId,
+      keys: [
+        { pubkey: compliancePda, isSigner: false, isWritable: true },
+        { pubkey: oraclePda, isSigner: false, isWritable: false },
+        { pubkey: disclosurePda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([
+        discriminator,
+        keyLenBuf,
+        Buffer.from(encryptedViewingKey),
+        scopeBuf,
+      ]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  /**
+   * Revoke a previous viewing key disclosure.
+   */
+  async revokeDisclosure(payer: Keypair, oracle: PublicKey): Promise<string> {
+    const disclosurePda = this.getDisclosurePda(
+      this.config.poolAddress,
+      payer.publicKey,
+      oracle,
+    );
+
+    // Anchor discriminator for "revoke_disclosure"
+    const discriminator = Buffer.from([
+      0xa1, 0x5b, 0xe4, 0x37, 0xc2, 0x68, 0xf9, 0x13,
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: this.config.complianceProgramId,
+      keys: [
+        { pubkey: disclosurePda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: false },
+      ],
+      data: discriminator,
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  /**
+   * Submit a ZK wealth proof attestation.
+   */
+  async submitWealthProof(
+    payer: Keypair,
+    threshold: bigint,
+    proofData: Uint8Array,
+    circuitType: number,
+  ): Promise<string> {
+    const compliancePda = this.getCompliancePda(this.config.poolAddress);
+    const wealthPda = this.getWealthAttestationPda(
+      this.config.poolAddress,
+      payer.publicKey,
+    );
+
+    // Anchor discriminator for "submit_wealth_proof"
+    const discriminator = Buffer.from([
+      0xd2, 0x47, 0x83, 0xbc, 0x5a, 0xf1, 0x96, 0x0e,
+    ]);
+
+    const thresholdBuf = Buffer.alloc(8);
+    thresholdBuf.writeBigUInt64LE(threshold);
+
+    // Vec<u8> encoding for proof_data
+    const proofLenBuf = Buffer.alloc(4);
+    proofLenBuf.writeUInt32LE(proofData.length);
+
+    const circuitBuf = Buffer.from([circuitType]);
+
+    const ix = new TransactionInstruction({
+      programId: this.config.complianceProgramId,
+      keys: [
+        { pubkey: compliancePda, isSigner: false, isWritable: false },
+        { pubkey: wealthPda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([
+        discriminator,
+        thresholdBuf,
+        proofLenBuf,
+        Buffer.from(proofData),
+        circuitBuf,
+      ]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  private serializeDisclosureScope(scope: DisclosureScope): Buffer {
+    // Borsh enum: variant index (1 byte) + variant data
+    if (scope === DisclosureScope.Full) {
+      return Buffer.from([0]);
+    } else if (scope === DisclosureScope.TimeBounded) {
+      return Buffer.from([1]);
+    } else {
+      return Buffer.from([2]);
+    }
   }
 }

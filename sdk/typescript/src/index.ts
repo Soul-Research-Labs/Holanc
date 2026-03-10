@@ -14,4 +14,11 @@ export {
   DisclosureScope,
   OraclePermissions,
 } from "./compliance";
+export {
+  poseidonHash,
+  poseidonHash2,
+  poseidonHashHex,
+  hexToField,
+  fieldToHex,
+} from "./poseidon";
 export * from "./types";

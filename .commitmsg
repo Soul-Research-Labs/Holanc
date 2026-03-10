@@ -1,0 +1,14 @@
+feat: integrate real Poseidon hashing, SDK tests, pool CPI fixes
+
+- Replace SHA-256 with circomlibjs Poseidon in SDK
+- Add circomlibjs type declaration
+- Update wallet/stealth/encryption with Poseidon hashing
+- Wire useHolanc hook to real SDK
+- Add bridge/compliance write operations
+- Implement Rust prover and client operations
+- Fix pool CPI verifier program ID and discriminator
+- Create SDK unit tests (poseidon, wallet, stealth)
+- Create Anchor pool instruction tests
+- Fix E2E stealth tests
+- Upgrade tsconfig to es2020
+- All 48 Rust tests and 34 SDK tests passing

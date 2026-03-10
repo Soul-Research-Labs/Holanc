@@ -9,6 +9,8 @@ export interface Note {
   value: bigint;
   assetId: Hash32;
   blinding: Hash32;
+  commitment: Hash32;
+  nullifier: Hash32;
   leafIndex?: number;
   spent: boolean;
 }

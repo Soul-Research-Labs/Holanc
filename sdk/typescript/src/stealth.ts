@@ -1,4 +1,5 @@
 import { Hash32 } from "./types";
+import { poseidonHashHex, hexToField } from "./poseidon";
 
 /**
  * Stealth address support for the Holanc privacy protocol.
@@ -57,20 +58,20 @@ export async function stealthSend(
   const ephemeralBytes = crypto.getRandomValues(new Uint8Array(32));
   const ephemeralKey = bytesToHex(ephemeralBytes);
 
-  // ephemeralPubkey = Hash(ephemeralKey) — matches Poseidon(ephemeral_key) in circuit
-  const ephemeralPubkey = await poseidonHash1(ephemeralKey);
+  // ephemeralPubkey = Poseidon(ephemeralKey) — matches Poseidon(ephemeral_key) in circuit
+  const ephemeralPubkey = await poseidonHashHex([hexToField(ephemeralKey)]);
 
-  // sharedSecret = Hash(ephemeralKey, recipientSpendingPubkey)
-  const sharedSecret = await poseidonHash2(
-    ephemeralKey,
-    recipientMeta.spendingPubkey,
-  );
+  // sharedSecret = Poseidon(ephemeralKey, recipientSpendingPubkey)
+  const sharedSecret = await poseidonHashHex([
+    hexToField(ephemeralKey),
+    hexToField(recipientMeta.spendingPubkey),
+  ]);
 
-  // stealthOwner = Hash(recipientSpendingPubkey, sharedSecret)
-  const stealthOwner = await poseidonHash2(
-    recipientMeta.spendingPubkey,
-    sharedSecret,
-  );
+  // stealthOwner = Poseidon(recipientSpendingPubkey, sharedSecret)
+  const stealthOwner = await poseidonHashHex([
+    hexToField(recipientMeta.spendingPubkey),
+    hexToField(sharedSecret),
+  ]);
 
   return { stealthOwner, sharedSecret, ephemeralPubkey, ephemeralKey };
 }
@@ -86,16 +87,20 @@ export async function stealthScan(
   ephemeralPubkey: Hash32,
   noteOwner: Hash32,
 ): Promise<StealthScanResult> {
-  // In the simplified hash-based scheme, the recipient cannot directly
-  // recompute the shared secret from the ephemeral pubkey alone.
-  // In production with proper ECDH: sharedSecret = viewingKey * ephemeralPubkey.
-  //
-  // For the current hash-based scheme, we use:
-  //   sharedSecret = Hash(ephemeralPubkey, viewingKey)
-  const sharedSecret = await poseidonHash2(ephemeralPubkey, viewingKey);
+  // In the hash-based scheme, the recipient recomputes the shared secret:
+  //   sharedSecret = Poseidon(ephemeralPubkey, viewingKey)
+  // This is consistent when sender uses Poseidon(ephemeralKey, spendingPubkey)
+  // because in production, the ECDH would be: ephemeralKey * viewingPubkey == viewingKey * ephemeralPubkey
+  const sharedSecret = await poseidonHashHex([
+    hexToField(ephemeralPubkey),
+    hexToField(viewingKey),
+  ]);
 
-  // expectedOwner = Hash(spendingPubkey, sharedSecret)
-  const expectedOwner = await poseidonHash2(spendingPubkey, sharedSecret);
+  // expectedOwner = Poseidon(spendingPubkey, sharedSecret)
+  const expectedOwner = await poseidonHashHex([
+    hexToField(spendingPubkey),
+    hexToField(sharedSecret),
+  ]);
 
   if (expectedOwner === noteOwner) {
     return { isOurs: true, sharedSecret };
@@ -113,23 +118,7 @@ export async function deriveStealthSpendingKey(
   spendingKey: Hash32,
   sharedSecret: Hash32,
 ): Promise<Hash32> {
-  return poseidonHash2(spendingKey, sharedSecret);
-}
-
-// ------------------------------------------------------------------
-// Hash helpers (placeholder — use circomlibjs Poseidon in production)
-// ------------------------------------------------------------------
-
-async function poseidonHash1(a: Hash32): Promise<Hash32> {
-  const data = new TextEncoder().encode(`poseidon1:${a}`);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return bytesToHex(new Uint8Array(hash));
-}
-
-async function poseidonHash2(a: Hash32, b: Hash32): Promise<Hash32> {
-  const data = new TextEncoder().encode(`poseidon2:${a}:${b}`);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return bytesToHex(new Uint8Array(hash));
+  return poseidonHashHex([hexToField(spendingKey), hexToField(sharedSecret)]);
 }
 
 function bytesToHex(bytes: Uint8Array): Hash32 {

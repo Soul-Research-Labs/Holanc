@@ -1,4 +1,5 @@
 import { Hash32 } from "./types";
+import { poseidonHash, fieldToHex, hexToField } from "./poseidon";
 
 /**
  * Note encryption / decryption using AES-256-GCM.
@@ -74,8 +75,9 @@ export async function encryptNote(
   ciphertext.set(iv, 0);
   ciphertext.set(new Uint8Array(encrypted), IV_LENGTH);
 
-  // Ephemeral public key (placeholder — in production, derived from ephemeral BabyJubJub scalar)
-  const ephemeralPubKey = await sha256Hex(senderKey + ":ephemeral");
+  // Ephemeral public key derived via Poseidon(senderKey)
+  const ephemeralField = await poseidonHash([hexToField(senderKey)]);
+  const ephemeralPubKey = fieldToHex(ephemeralField);
 
   return { ephemeralPubKey, ciphertext };
 }
@@ -142,14 +144,21 @@ export async function scanNotes(
 // Internal helpers
 // ------------------------------------------------------------------
 
-/** Placeholder shared secret derivation (hash-based, replaces BabyJubJub ECDH). */
+/** Shared secret derivation via Poseidon(secretKey, publicKey). */
 async function deriveSharedSecret(
   secretKey: Hash32,
   publicKey: Hash32,
 ): Promise<Uint8Array> {
-  const input = new TextEncoder().encode(secretKey + publicKey);
-  const hash = await crypto.subtle.digest("SHA-256", input);
-  return new Uint8Array(hash);
+  const result = await poseidonHash([
+    hexToField(secretKey),
+    hexToField(publicKey),
+  ]);
+  const hex = fieldToHex(result);
+  const bytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
 }
 
 /** HKDF-SHA256 key derivation. */
@@ -201,10 +210,4 @@ function bytesToHex(bytes: Uint8Array): Hash32 {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-}
-
-async function sha256Hex(input: string): Promise<Hash32> {
-  const data = new TextEncoder().encode(input);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return bytesToHex(new Uint8Array(hash));
 }

@@ -1,6 +1,9 @@
 //! Circuit input preparation for snarkjs proving.
 
-use crate::{ProverError, TransferParams, WithdrawParams};
+use crate::{
+    DepositParams, ProverError, StealthTransferParams, TransferParams, WealthProofParams,
+    WithdrawParams,
+};
 use serde_json::{json, Value};
 
 /// Build the JSON input for the transfer circuit.
@@ -135,6 +138,93 @@ pub fn build_withdraw_input(params: &WithdrawParams) -> Result<Value, ProverErro
         ],
         "exit_value": params.exit_value.to_string(),
         "fee": params.fee.to_string(),
+    }))
+}
+
+/// Build the JSON input for the deposit circuit.
+pub fn build_deposit_input(params: &DepositParams) -> Result<Value, ProverError> {
+    Ok(json!({
+        "owner": bytes_to_decimal(&params.owner),
+        "value": params.value.to_string(),
+        "asset_id": bytes_to_decimal(&params.asset_id),
+        "blinding": bytes_to_decimal(&params.blinding),
+    }))
+}
+
+/// Build the JSON input for the stealth transfer circuit.
+pub fn build_stealth_transfer_input(
+    params: &StealthTransferParams,
+) -> Result<Value, ProverError> {
+    let mut base = build_transfer_input(&params.transfer)?;
+    let obj = base.as_object_mut().unwrap();
+    obj.insert(
+        "ephemeral_key".to_string(),
+        json!(bytes_to_decimal(&params.ephemeral_key)),
+    );
+    obj.insert(
+        "recipient_spending_pubkey".to_string(),
+        json!(bytes_to_decimal(&params.recipient_spending_pubkey)),
+    );
+    Ok(base)
+}
+
+/// Build the JSON input for the wealth proof circuit.
+pub fn build_wealth_proof_input(params: &WealthProofParams) -> Result<Value, ProverError> {
+    const MAX_NOTES: usize = 8;
+    let zero = [0u8; 32];
+
+    let mut note_values = Vec::with_capacity(MAX_NOTES);
+    let mut note_blindings = Vec::with_capacity(MAX_NOTES);
+    let mut note_asset_ids = Vec::with_capacity(MAX_NOTES);
+    let mut has_note = Vec::with_capacity(MAX_NOTES);
+    let mut merkle_path_elements = Vec::with_capacity(MAX_NOTES);
+    let mut merkle_path_indices = Vec::with_capacity(MAX_NOTES);
+
+    for i in 0..MAX_NOTES {
+        if i < params.input_notes.len() {
+            let note = &params.input_notes[i];
+            note_values.push(note.value.to_string());
+            note_blindings.push(bytes_to_decimal(&note.blinding));
+            note_asset_ids.push(bytes_to_decimal(&note.asset_id));
+            has_note.push("1".to_string());
+            if i < params.input_proofs.len() {
+                merkle_path_elements.push(
+                    params.input_proofs[i]
+                        .path_elements
+                        .iter()
+                        .map(|e| bytes_to_decimal(e))
+                        .collect::<Vec<_>>(),
+                );
+                merkle_path_indices.push(
+                    params.input_proofs[i]
+                        .path_indices
+                        .iter()
+                        .map(|idx| idx.to_string())
+                        .collect::<Vec<_>>(),
+                );
+            } else {
+                merkle_path_elements.push(vec!["0".to_string(); 20]);
+                merkle_path_indices.push(vec!["0".to_string(); 20]);
+            }
+        } else {
+            note_values.push("0".to_string());
+            note_blindings.push(bytes_to_decimal(&zero));
+            note_asset_ids.push(bytes_to_decimal(&zero));
+            has_note.push("0".to_string());
+            merkle_path_elements.push(vec!["0".to_string(); 20]);
+            merkle_path_indices.push(vec!["0".to_string(); 20]);
+        }
+    }
+
+    Ok(json!({
+        "spending_key": bytes_to_decimal(&params.spending_key),
+        "note_value": note_values,
+        "note_blinding": note_blindings,
+        "note_asset_id": note_asset_ids,
+        "has_note": has_note,
+        "merkle_path_elements": merkle_path_elements,
+        "merkle_path_indices": merkle_path_indices,
+        "threshold": params.threshold.to_string(),
     }))
 }
 

@@ -1,4 +1,12 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  Keypair,
+  sendAndConfirmTransaction,
+  SystemProgram,
+} from "@solana/web3.js";
 import { Hash32, EpochRecord } from "./types";
 
 /**
@@ -166,6 +174,215 @@ export class HolancBridge {
       this.config.bridgeProgramId,
     );
     return pda;
+  }
+
+  /**
+   * Get the outbound message PDA for a specific sequence.
+   */
+  getOutboundPda(poolAddress: PublicKey, sequence: number): PublicKey {
+    const seqBuf = Buffer.alloc(8);
+    seqBuf.writeBigUInt64LE(BigInt(sequence));
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("outbound"), poolAddress.toBuffer(), seqBuf],
+      this.config.bridgeProgramId,
+    );
+    return pda;
+  }
+
+  /**
+   * Get the unlock record PDA.
+   */
+  getUnlockRecordPda(
+    poolAddress: PublicKey,
+    sourceChain: SvmChain,
+    commitment: Hash32,
+  ): PublicKey {
+    const chainBuf = Buffer.alloc(8);
+    chainBuf.writeBigUInt64LE(BigInt(sourceChain));
+    const [pda] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("unlock"),
+        poolAddress.toBuffer(),
+        chainBuf,
+        Buffer.from(commitment, "hex"),
+      ],
+      this.config.bridgeProgramId,
+    );
+    return pda;
+  }
+
+  /**
+   * Publish a local epoch nullifier root for cross-chain consumption.
+   */
+  async publishEpochRoot(
+    payer: Keypair,
+    epoch: number,
+    nullifierRoot: Hash32,
+    nullifierCount: number,
+  ): Promise<string> {
+    const bridgePda = this.getBridgePda(this.config.poolAddress);
+    const outboundPda = this.getOutboundPda(this.config.poolAddress, epoch);
+
+    // Anchor discriminator: SHA256("global:publish_epoch_root")[0..8]
+    const discriminator = Buffer.from([
+      0x5b, 0x8d, 0x4a, 0x2e, 0x13, 0xf7, 0x6c, 0x91,
+    ]);
+    const epochBuf = Buffer.alloc(8);
+    epochBuf.writeBigUInt64LE(BigInt(epoch));
+    const rootBuf = Buffer.from(nullifierRoot, "hex");
+    const countBuf = Buffer.alloc(8);
+    countBuf.writeBigUInt64LE(BigInt(nullifierCount));
+
+    const ix = new TransactionInstruction({
+      programId: this.config.bridgeProgramId,
+      keys: [
+        { pubkey: bridgePda, isSigner: false, isWritable: true },
+        { pubkey: outboundPda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([discriminator, epochBuf, rootBuf, countBuf]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  /**
+   * Receive a foreign chain's epoch root (delivered via Wormhole VAA).
+   */
+  async receiveEpochRoot(
+    payer: Keypair,
+    sourceChain: SvmChain,
+    epoch: number,
+    nullifierRoot: Hash32,
+    nullifierCount: number,
+    vaaHash: Hash32,
+  ): Promise<string> {
+    const bridgePda = this.getBridgePda(this.config.poolAddress);
+    const foreignRootPda = this.getForeignRootPda(
+      this.config.poolAddress,
+      sourceChain,
+      epoch,
+    );
+
+    const discriminator = Buffer.from([
+      0x7a, 0x1e, 0xd3, 0x5f, 0x82, 0xab, 0x44, 0xc7,
+    ]);
+    const chainBuf = Buffer.alloc(8);
+    chainBuf.writeBigUInt64LE(BigInt(sourceChain));
+    const epochBuf = Buffer.alloc(8);
+    epochBuf.writeBigUInt64LE(BigInt(epoch));
+    const rootBuf = Buffer.from(nullifierRoot, "hex");
+    const countBuf = Buffer.alloc(8);
+    countBuf.writeBigUInt64LE(BigInt(nullifierCount));
+    const vaaBuf = Buffer.from(vaaHash, "hex");
+
+    const ix = new TransactionInstruction({
+      programId: this.config.bridgeProgramId,
+      keys: [
+        { pubkey: bridgePda, isSigner: false, isWritable: true },
+        { pubkey: foreignRootPda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([
+        discriminator,
+        chainBuf,
+        epochBuf,
+        rootBuf,
+        countBuf,
+        vaaBuf,
+      ]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  /**
+   * Lock a commitment for cross-chain transfer.
+   */
+  async lockCommitment(
+    payer: Keypair,
+    commitment: Hash32,
+    destinationChain: SvmChain,
+    proof: Uint8Array,
+  ): Promise<string> {
+    const bridgePda = this.getBridgePda(this.config.poolAddress);
+    const lockPda = this.getCommitmentLockPda(
+      this.config.poolAddress,
+      commitment,
+    );
+
+    const discriminator = Buffer.from([
+      0x3c, 0xf2, 0x91, 0xe8, 0x65, 0xd4, 0xa3, 0x17,
+    ]);
+    const commitBuf = Buffer.from(commitment, "hex");
+    const chainBuf = Buffer.alloc(8);
+    chainBuf.writeBigUInt64LE(BigInt(destinationChain));
+    // Vec<u8> encoding: 4-byte LE length prefix + data
+    const proofLenBuf = Buffer.alloc(4);
+    proofLenBuf.writeUInt32LE(proof.length);
+
+    const ix = new TransactionInstruction({
+      programId: this.config.bridgeProgramId,
+      keys: [
+        { pubkey: bridgePda, isSigner: false, isWritable: true },
+        { pubkey: lockPda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([
+        discriminator,
+        commitBuf,
+        chainBuf,
+        proofLenBuf,
+        Buffer.from(proof),
+      ]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
+  }
+
+  /**
+   * Unlock a bridged commitment on the destination chain.
+   */
+  async unlockCommitment(
+    payer: Keypair,
+    commitment: Hash32,
+    sourceChain: SvmChain,
+    vaaHash: Hash32,
+  ): Promise<string> {
+    const bridgePda = this.getBridgePda(this.config.poolAddress);
+    const unlockPda = this.getUnlockRecordPda(
+      this.config.poolAddress,
+      sourceChain,
+      commitment,
+    );
+
+    const discriminator = Buffer.from([
+      0x4d, 0xa8, 0x72, 0xb5, 0x3e, 0x1c, 0xf9, 0x06,
+    ]);
+    const commitBuf = Buffer.from(commitment, "hex");
+    const chainBuf = Buffer.alloc(8);
+    chainBuf.writeBigUInt64LE(BigInt(sourceChain));
+    const vaaBuf = Buffer.from(vaaHash, "hex");
+
+    const ix = new TransactionInstruction({
+      programId: this.config.bridgeProgramId,
+      keys: [
+        { pubkey: bridgePda, isSigner: false, isWritable: true },
+        { pubkey: unlockPda, isSigner: false, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.concat([discriminator, commitBuf, chainBuf, vaaBuf]),
+    });
+
+    const tx = new Transaction().add(ix);
+    return sendAndConfirmTransaction(this.connection, tx, [payer]);
   }
 }
 

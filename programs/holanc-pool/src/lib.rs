@@ -3,6 +3,14 @@ use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
 declare_id!("6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT");
 
+/// Verifier program ID for CPI.
+const VERIFIER_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+    0xea, 0x56, 0x05, 0x0b, 0xab, 0xf1, 0x5f, 0x69,
+    0xdd, 0xa7, 0x3b, 0x04, 0xa0, 0x8c, 0xd3, 0xa0,
+    0x53, 0x52, 0x09, 0xa1, 0xd4, 0x11, 0x22, 0x75,
+    0x13, 0x20, 0x07, 0xab, 0x3d, 0x64, 0x9a, 0x0b,
+]);
+
 /// Merkle tree depth for the commitment tree.
 pub const TREE_DEPTH: usize = 20;
 /// Number of historical roots to store (ring buffer).
@@ -115,6 +123,9 @@ pub mod holanc_pool {
         output_commitments: [[u8; 32]; MAX_OUTPUTS],
         fee: u64,
         encrypted_notes: Vec<Vec<u8>>,
+        proof_a: [u8; 64],
+        proof_b: [u8; 128],
+        proof_c: [u8; 64],
     ) -> Result<()> {
         // Extract key before mutable borrow
         let pool_key = ctx.accounts.pool.key();
@@ -127,9 +138,28 @@ pub mod holanc_pool {
             HolancPoolError::UnknownMerkleRoot
         );
 
-        // Check nullifiers haven't been spent (CPI to holanc-nullifier)
-        // For now, we store nullifiers in the pool's event log and rely
-        // on the nullifier program for on-chain double-spend checks.
+        // Verify the ZK proof via CPI to holanc-verifier
+        let mut public_inputs: Vec<[u8; 32]> = Vec::with_capacity(6);
+        public_inputs.push(merkle_root);
+        public_inputs.push(nullifiers[0]);
+        public_inputs.push(nullifiers[1]);
+        public_inputs.push(output_commitments[0]);
+        public_inputs.push(output_commitments[1]);
+        let mut fee_bytes = [0u8; 32];
+        fee_bytes[24..].copy_from_slice(&fee.to_be_bytes());
+        public_inputs.push(fee_bytes);
+
+        verify_proof_cpi(
+            &ctx.accounts.verifier_program,
+            &ctx.accounts.verification_key,
+            &ctx.accounts.authority,
+            proof_a,
+            proof_b,
+            proof_c,
+            public_inputs,
+        )?;
+
+        // Check nullifiers haven't been spent
         let nullifier_registry = &mut ctx.accounts.nullifier_registry;
         for nf in &nullifiers {
             require!(
@@ -177,6 +207,9 @@ pub mod holanc_pool {
         exit_amount: u64,
         fee: u64,
         encrypted_notes: Vec<Vec<u8>>,
+        proof_a: [u8; 64],
+        proof_b: [u8; 128],
+        proof_c: [u8; 64],
     ) -> Result<()> {
         // Extract key and bump before mutable borrow
         let pool_key = ctx.accounts.pool.key();
@@ -190,6 +223,30 @@ pub mod holanc_pool {
             is_known_root(pool, &merkle_root),
             HolancPoolError::UnknownMerkleRoot
         );
+
+        // Verify the ZK proof via CPI to holanc-verifier
+        let mut public_inputs: Vec<[u8; 32]> = Vec::with_capacity(7);
+        public_inputs.push(merkle_root);
+        public_inputs.push(nullifiers[0]);
+        public_inputs.push(nullifiers[1]);
+        public_inputs.push(output_commitments[0]);
+        public_inputs.push(output_commitments[1]);
+        let mut exit_bytes = [0u8; 32];
+        exit_bytes[24..].copy_from_slice(&exit_amount.to_be_bytes());
+        public_inputs.push(exit_bytes);
+        let mut fee_bytes = [0u8; 32];
+        fee_bytes[24..].copy_from_slice(&fee.to_be_bytes());
+        public_inputs.push(fee_bytes);
+
+        verify_proof_cpi(
+            &ctx.accounts.verifier_program,
+            &ctx.accounts.verification_key,
+            &ctx.accounts.authority,
+            proof_a,
+            proof_b,
+            proof_c,
+            public_inputs,
+        )?;
 
         // Check and register nullifiers
         let nullifier_registry = &mut ctx.accounts.nullifier_registry;
@@ -281,6 +338,61 @@ fn is_known_root(pool: &PoolState, root: &[u8; 32]) -> bool {
     pool.root_history.iter().any(|r| r == root)
 }
 
+/// CPI to holanc-verifier's verify_proof instruction.
+fn verify_proof_cpi<'info>(
+    verifier_program: &AccountInfo<'info>,
+    verification_key: &AccountInfo<'info>,
+    authority: &Signer<'info>,
+    proof_a: [u8; 64],
+    proof_b: [u8; 128],
+    proof_c: [u8; 64],
+    public_inputs: Vec<[u8; 32]>,
+) -> Result<()> {
+    use anchor_lang::solana_program::instruction::Instruction;
+    use anchor_lang::solana_program::program::invoke;
+
+    // Build the verify_proof instruction data manually
+    // Anchor discriminator for "verify_proof" = first 8 bytes of SHA256("global:verify_proof")
+    let discriminator: [u8; 8] = [0xd9, 0xd3, 0xbf, 0x6e, 0x90, 0x0d, 0xba, 0x62];
+
+    let mut data = Vec::with_capacity(8 + 64 + 128 + 64 + 4 + public_inputs.len() * 32);
+    data.extend_from_slice(&discriminator);
+    data.extend_from_slice(&proof_a);
+    data.extend_from_slice(&proof_b);
+    data.extend_from_slice(&proof_c);
+    // Vec<[u8; 32]> Borsh encoding: 4-byte LE length + elements
+    data.extend_from_slice(&(public_inputs.len() as u32).to_le_bytes());
+    for input in &public_inputs {
+        data.extend_from_slice(input);
+    }
+
+    let ix = Instruction {
+        program_id: *verifier_program.key,
+        accounts: vec![
+            anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                *verification_key.key,
+                false,
+            ),
+            anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                *authority.key,
+                true,
+            ),
+        ],
+        data,
+    };
+
+    invoke(
+        &ix,
+        &[
+            verification_key.clone(),
+            authority.to_account_info(),
+            verifier_program.clone(),
+        ],
+    )?;
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Accounts
 // ---------------------------------------------------------------------------
@@ -349,6 +461,15 @@ pub struct PrivateTransfer<'info> {
     #[account(mut)]
     pub nullifier_registry: Account<'info, NullifierRegistry>,
 
+    /// The holanc-verifier program for proof CPI.
+    /// CHECK: Verified by address constraint.
+    #[account(address = VERIFIER_PROGRAM_ID)]
+    pub verifier_program: AccountInfo<'info>,
+
+    /// The verification key account for the transfer circuit.
+    /// CHECK: Owned by the verifier program.
+    pub verification_key: AccountInfo<'info>,
+
     pub authority: Signer<'info>,
 }
 
@@ -368,6 +489,15 @@ pub struct Withdraw<'info> {
 
     #[account(mut)]
     pub recipient_token_account: Account<'info, TokenAccount>,
+
+    /// The holanc-verifier program for proof CPI.
+    /// CHECK: Verified by address constraint.
+    #[account(address = VERIFIER_PROGRAM_ID)]
+    pub verifier_program: AccountInfo<'info>,
+
+    /// The verification key account for the withdraw circuit.
+    /// CHECK: Owned by the verifier program.
+    pub verification_key: AccountInfo<'info>,
 
     pub authority: Signer<'info>,
 
@@ -520,4 +650,6 @@ pub enum HolancPoolError {
     InsufficientPoolBalance,
     #[msg("Unauthorized")]
     Unauthorized,
+    #[msg("Proof verification failed")]
+    ProofVerificationFailed,
 }

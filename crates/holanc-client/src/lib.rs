@@ -163,6 +163,160 @@ impl Wallet {
     pub fn history(&self) -> &[TxRecord] {
         &self.history
     }
+
+    /// Get the spending key reference.
+    pub fn spending_key(&self) -> &SpendingKey {
+        &self.spending_key
+    }
+
+    /// Prepare input/output notes for a private transfer.
+    ///
+    /// Returns (input_notes, output_notes, input_proofs) ready for proof generation.
+    pub fn prepare_transfer(
+        &self,
+        recipient_owner: [u8; 32],
+        amount: u64,
+        fee: u64,
+    ) -> Result<PreparedTransfer, WalletError> {
+        let total = amount.checked_add(fee).ok_or(WalletError::InsufficientBalance {
+            have: self.balance(),
+            need: u64::MAX,
+        })?;
+        let selected = self.select_notes(total)?;
+        let input_sum: u64 = selected.iter().map(|n| n.value).sum();
+        let change = input_sum - total;
+
+        // Build input notes array (padded to 2)
+        let mut input_notes = [
+            Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32]),
+            Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32]),
+        ];
+        let mut input_proofs = Vec::new();
+
+        for (i, note) in selected.iter().enumerate() {
+            input_notes[i] = (*note).clone();
+            if let Some(idx) = note.leaf_index {
+                input_proofs.push(
+                    self.tree
+                        .proof(idx)
+                        .map_err(|e| WalletError::NoteNotFound(idx))?,
+                );
+            } else {
+                return Err(WalletError::NoteNotFound(0));
+            }
+        }
+        // Pad proofs if only 1 input
+        while input_proofs.len() < 2 {
+            input_proofs.push(holanc_tree::MerkleProof {
+                leaf_index: 0,
+                path_elements: vec![[0u8; 32]; 20],
+                path_indices: vec![0u8; 20],
+                root: self.tree.root(),
+            });
+        }
+
+        // Build output notes
+        let recipient_note = Note::new(recipient_owner, amount, self.asset_id);
+        let change_note = if change > 0 {
+            Note::new(*self.owner(), change, self.asset_id)
+        } else {
+            Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32])
+        };
+
+        Ok(PreparedTransfer {
+            input_notes,
+            output_notes: [recipient_note, change_note],
+            input_proofs: [input_proofs[0].clone(), input_proofs[1].clone()],
+            fee,
+        })
+    }
+
+    /// Prepare input/output notes for a withdrawal.
+    pub fn prepare_withdraw(
+        &self,
+        amount: u64,
+        fee: u64,
+    ) -> Result<PreparedWithdraw, WalletError> {
+        let total = amount.checked_add(fee).ok_or(WalletError::InsufficientBalance {
+            have: self.balance(),
+            need: u64::MAX,
+        })?;
+        let selected = self.select_notes(total)?;
+        let input_sum: u64 = selected.iter().map(|n| n.value).sum();
+        let change = input_sum - total;
+
+        let mut input_notes = [
+            Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32]),
+            Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32]),
+        ];
+        let mut input_proofs = Vec::new();
+
+        for (i, note) in selected.iter().enumerate() {
+            input_notes[i] = (*note).clone();
+            if let Some(idx) = note.leaf_index {
+                input_proofs.push(
+                    self.tree
+                        .proof(idx)
+                        .map_err(|e| WalletError::NoteNotFound(idx))?,
+                );
+            } else {
+                return Err(WalletError::NoteNotFound(0));
+            }
+        }
+        while input_proofs.len() < 2 {
+            input_proofs.push(holanc_tree::MerkleProof {
+                leaf_index: 0,
+                path_elements: vec![[0u8; 32]; 20],
+                path_indices: vec![0u8; 20],
+                root: self.tree.root(),
+            });
+        }
+
+        let change_note = if change > 0 {
+            Note::new(*self.owner(), change, self.asset_id)
+        } else {
+            Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32])
+        };
+
+        Ok(PreparedWithdraw {
+            input_notes,
+            output_notes: [
+                change_note,
+                Note::with_blinding([0u8; 32], 0, self.asset_id, [0u8; 32]),
+            ],
+            input_proofs: [input_proofs[0].clone(), input_proofs[1].clone()],
+            exit_value: amount,
+            fee,
+        })
+    }
+
+    /// Mark notes as spent by their leaf indices.
+    pub fn mark_spent(&mut self, leaf_indices: &[u64]) {
+        for note in self.notes.iter_mut() {
+            if let Some(idx) = note.leaf_index {
+                if leaf_indices.contains(&idx) {
+                    note.spent = true;
+                }
+            }
+        }
+    }
+}
+
+/// Prepared transfer data, ready for proof generation.
+pub struct PreparedTransfer {
+    pub input_notes: [Note; 2],
+    pub output_notes: [Note; 2],
+    pub input_proofs: [holanc_tree::MerkleProof; 2],
+    pub fee: u64,
+}
+
+/// Prepared withdrawal data, ready for proof generation.
+pub struct PreparedWithdraw {
+    pub input_notes: [Note; 2],
+    pub output_notes: [Note; 2],
+    pub input_proofs: [holanc_tree::MerkleProof; 2],
+    pub exit_value: u64,
+    pub fee: u64,
 }
 
 #[cfg(test)]
