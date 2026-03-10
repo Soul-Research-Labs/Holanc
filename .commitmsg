@@ -1,20 +1,18 @@
-feat: expand CLI with full REPL, on-chain incremental Merkle tree
+feat: comprehensive E2E integration tests (Phase 3)
 
-Phase 2: CLI Expansion & Merkle Tree
+Anchor integration tests for all 5 programs:
+- Verifier: VK init, IC point limit, invalid proof rejection
+- Nullifier: manager init, register, double-spend, v2 registration, epoch finalize
+- Bridge: init, publish/receive epoch root, lock/unlock, admin controls
+- Compliance: init, oracle, disclosure, revoke, wealth proof, deactivate
 
-CLI:
-- Add transfer, withdraw commands with full coin selection
-- Add tree info, proof generation, export/import key commands
-- Add status overview, command aliases (d/t/w/bal/hist/n/q)
-- Pretty-print with box-drawing characters and status indicators
-- Show Merkle commitment, root, and leaf info for all operations
+Full-flow E2E test (7 stages):
+  Pool init -> 5 deposits -> Merkle root update -> Nullifier mgmt
+  -> Bridge -> Compliance -> Admin controls (pause/unpause)
 
-Merkle Tree:
-- Add next_index() and depth() accessors to holanc-tree
-- Add SpendingKey::from_bytes() to holanc-note
-- Implement on-chain incremental SHA-256 Merkle tree in pool deposit
-- Add filled_subtrees and sha256_root to PoolState
-- Pool now maintains both off-chain Poseidon root (via update_root)
-  and on-chain SHA-256 root (for consistency verification)
-
-All 47 Rust tests pass. Cargo build clean.
+Rust crate test coverage (48 -> 60 tests):
+- stealth.rs: stealth_receive match/reject, unique ephemeral keys
+- note.rs: Note::new random blinding, nullifier key divergence
+- keys.rs: SpendingKey::from_bytes roundtrip, random uniqueness
+- commitment.rs: deposit_commitment, hash_pair non-commutativity
+- tree: Merkle proof verification, next_index/depth accessors

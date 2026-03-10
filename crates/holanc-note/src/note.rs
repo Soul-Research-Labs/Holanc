@@ -113,4 +113,23 @@ mod tests {
         let nf_chain2 = note.nullifier_v2(&sk, 2, 0);
         assert_ne!(nf_chain1, nf_chain2);
     }
+
+    #[test]
+    fn test_note_new_random_blinding() {
+        let n1 = Note::new(test_owner(), 100, [0u8; 32]);
+        let n2 = Note::new(test_owner(), 100, [0u8; 32]);
+        // Random blinding means different commitments
+        assert_ne!(n1.blinding, n2.blinding);
+        assert_ne!(n1.commitment(), n2.commitment());
+        assert!(!n1.spent);
+        assert!(n1.leaf_index.is_none());
+    }
+
+    #[test]
+    fn test_note_nullifier_v1_differs_for_different_keys() {
+        let note = Note::with_blinding(test_owner(), 100, [0u8; 32], [42u8; 32]);
+        let nf1 = note.nullifier_v1(&[1u8; 32]);
+        let nf2 = note.nullifier_v1(&[2u8; 32]);
+        assert_ne!(nf1, nf2);
+    }
 }

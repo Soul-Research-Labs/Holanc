@@ -105,4 +105,37 @@ mod tests {
         assert_eq!(bytes[31], 100);
         assert_eq!(bytes[0], 0);
     }
+
+    #[test]
+    fn test_deposit_commitment_deterministic() {
+        let owner = [1u8; 32];
+        let value = 500u64;
+        let blinding = [3u8; 32];
+
+        let c1 = deposit_commitment(&owner, value, &blinding).unwrap();
+        let c2 = deposit_commitment(&owner, value, &blinding).unwrap();
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_deposit_commitment_differs_from_note_commitment() {
+        let owner = [1u8; 32];
+        let value = 100u64;
+        let blinding = [3u8; 32];
+        let asset_id = [0u8; 32];
+
+        let dc = deposit_commitment(&owner, value, &blinding).unwrap();
+        let nc = note_commitment(&owner, value, &asset_id, &blinding).unwrap();
+        // 3-input vs 4-input hash should differ even with zero asset_id
+        assert_ne!(dc, nc);
+    }
+
+    #[test]
+    fn test_hash_pair_is_non_commutative() {
+        let a = [1u8; 32];
+        let b = [2u8; 32];
+        let h1 = hash_pair(&a, &b).unwrap();
+        let h2 = hash_pair(&b, &a).unwrap();
+        assert_ne!(h1, h2, "Poseidon hash pair should be non-commutative");
+    }
 }

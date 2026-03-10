@@ -134,9 +134,6 @@ mod tests {
 
     #[test]
     fn test_stealth_address_roundtrip() {
-        // Note: In real implementation, the sender and receiver ECDH would match.
-        // This test validates the structure and API, not the ECDH key agreement,
-        // which requires BabyJubJub curve operations.
         let meta = StealthMetaAddress {
             viewing_pubkey: [10u8; 32],
             spending_pubkey: [20u8; 32],
@@ -146,5 +143,55 @@ mod tests {
         assert_ne!(send_result.one_time_owner, [0u8; 32]);
         assert_ne!(send_result.shared_secret, [0u8; 32]);
         assert_ne!(send_result.ephemeral_pubkey, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_stealth_receive_rejects_wrong_owner() {
+        let viewing_key = [10u8; 32];
+        let spending_pubkey = [20u8; 32];
+        let ephemeral_pubkey = [30u8; 32];
+        let wrong_owner = [99u8; 32];
+
+        let result = stealth_receive(&viewing_key, &spending_pubkey, &ephemeral_pubkey, &wrong_owner).unwrap();
+        assert!(result.is_none(), "Wrong owner should not match");
+    }
+
+    #[test]
+    fn test_stealth_receive_matches_correct_owner() {
+        // Manually compute what stealth_receive expects:
+        // shared_secret = SHA256("holanc-ecdh-shared-secret-recv" || viewing_key || ephemeral_pubkey)
+        // expected_owner = Poseidon(shared_secret, spending_pubkey)
+        let viewing_key = [10u8; 32];
+        let spending_pubkey = [20u8; 32];
+        let ephemeral_pubkey = [30u8; 32];
+
+        // Compute the expected owner the same way stealth_receive does
+        let shared_secret = {
+            let mut hasher = Sha256::new();
+            hasher.update(b"holanc-ecdh-shared-secret-recv");
+            hasher.update(&viewing_key);
+            hasher.update(&ephemeral_pubkey);
+            let hash = hasher.finalize();
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&hash);
+            out
+        };
+        let expected_owner = poseidon_hash(&shared_secret, &spending_pubkey).unwrap();
+
+        let result = stealth_receive(&viewing_key, &spending_pubkey, &ephemeral_pubkey, &expected_owner).unwrap();
+        assert!(result.is_some(), "Correct owner should match");
+        assert_eq!(result.unwrap(), shared_secret);
+    }
+
+    #[test]
+    fn test_stealth_send_produces_unique_ephemeral_keys() {
+        let meta = StealthMetaAddress {
+            viewing_pubkey: [10u8; 32],
+            spending_pubkey: [20u8; 32],
+        };
+        let r1 = stealth_send(&meta).unwrap();
+        let r2 = stealth_send(&meta).unwrap();
+        assert_ne!(r1.ephemeral_pubkey, r2.ephemeral_pubkey);
+        assert_ne!(r1.one_time_owner, r2.one_time_owner);
     }
 }

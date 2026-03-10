@@ -269,4 +269,47 @@ mod tests {
 
         assert_eq!(tree1.root(), tree2.root());
     }
+
+    #[test]
+    fn test_merkle_proof_verification() {
+        let mut tree = MerkleTree::new(4);
+
+        for i in 0..4u8 {
+            let mut leaf = [0u8; 32];
+            leaf[31] = i + 1;
+            tree.append(leaf).unwrap();
+        }
+
+        // Verify proof for each leaf by recomputing root from proof
+        for i in 0..4u64 {
+            let proof = tree.proof(i).unwrap();
+            let mut leaf = [0u8; 32];
+            leaf[31] = (i + 1) as u8;
+
+            // Recompute root from proof
+            let mut current = leaf;
+            for level in 0..proof.path_elements.len() {
+                if proof.path_indices[level] == 0 {
+                    current = hash_pair(&current, &proof.path_elements[level]).unwrap();
+                } else {
+                    current = hash_pair(&proof.path_elements[level], &current).unwrap();
+                }
+            }
+            assert_eq!(current, proof.root, "Proof verification failed for leaf {}", i);
+            assert_eq!(current, tree.root(), "Proof root doesn't match tree root for leaf {}", i);
+        }
+    }
+
+    #[test]
+    fn test_next_index_and_depth() {
+        let mut tree = MerkleTree::new(5);
+        assert_eq!(tree.next_index(), 0);
+        assert_eq!(tree.depth(), 5);
+
+        tree.append([1u8; 32]).unwrap();
+        assert_eq!(tree.next_index(), 1);
+
+        tree.append([2u8; 32]).unwrap();
+        assert_eq!(tree.next_index(), 2);
+    }
 }

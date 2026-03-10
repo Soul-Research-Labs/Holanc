@@ -156,4 +156,19 @@ mod tests {
         let vk = sk.viewing_key();
         assert_ne!(sk.as_bytes(), vk.as_bytes());
     }
+
+    #[test]
+    fn test_spending_key_from_bytes_roundtrip() {
+        let original = SpendingKey::from_seed(&[77u8; 32]);
+        let bytes = *original.as_bytes();
+        let restored = SpendingKey::from_bytes(bytes);
+        assert_eq!(original.as_bytes(), restored.as_bytes());
+    }
+
+    #[test]
+    fn test_spending_key_random_is_unique() {
+        let sk1 = SpendingKey::random();
+        let sk2 = SpendingKey::random();
+        assert_ne!(sk1.as_bytes(), sk2.as_bytes());
+    }
 }
