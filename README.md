@@ -95,7 +95,7 @@ chmod +x scripts/dev-setup.sh
 # 1. Build Rust workspace
 cargo build
 
-# 2. Run tests
+# 2. Run tests (60 unit tests across 6 crates)
 cargo test
 
 # 3. Build Anchor programs
@@ -106,6 +106,12 @@ anchor build
 
 # 5. Start local validator and run integration tests
 anchor test
+
+# 6. Run TypeScript SDK tests
+cd sdk/typescript && npm test
+
+# 7. Interactive CLI
+cargo run --bin holanc-cli
 ```
 
 ## Cryptographic Primitives
@@ -116,7 +122,7 @@ anchor test
 | Note commitment       | `Poseidon(owner, value, asset_id, blinding)`             |
 | Nullifier (V1)        | `Poseidon(spending_key, commitment)`                     |
 | Nullifier (V2)        | `Poseidon(Poseidon(sk, cm), Poseidon(chain_id, app_id))` |
-| Merkle tree           | Incremental Poseidon tree (depth 20)                     |
+| Merkle tree           | Incremental Poseidon tree (depth 20) + on-chain SHA-256 |
 | Proving system        | Groth16 on BN254                                         |
 | On-chain verification | Solana `alt_bn128` syscalls (add, mul, pairing)          |
 | Note encryption       | ChaCha20-Poly1305 with HKDF-SHA256 key derivation        |
@@ -162,6 +168,38 @@ A Next.js 14 application in `app/` with Solana wallet adapter integration.
 cd app
 npm install
 npm run dev
+```
+
+## Testing
+
+| Runner | Command | Scope |
+|--------|---------|-------|
+| Cargo (Rust) | `cargo test` | 60 unit/integration tests across primitives, note, tree, client, prover |
+| ts-mocha (Anchor) | `anchor test` | Smoke tests, pool/verifier/nullifier/bridge/compliance instructions, full E2E flow |
+| Jest (SDK) | `cd sdk/typescript && npm test` | Poseidon, stealth addresses, wallet, encryption |
+| Next.js build | `cd app && npm run build` | Type-checks and builds all 7 pages |
+
+## Docker
+
+```bash
+cd deploy
+docker compose up
+```
+
+Starts a full local stack: `solana-test-validator` → `relayer` (port 3001) → `indexer` → `app` (port 3000).
+
+## Documentation
+
+See [docs/](docs/) for detailed protocol documentation:
+
+- [Architecture](docs/architecture.md) — System overview and component design
+- [Protocol](docs/protocol.md) — Cryptographic specification
+- [Circuit Constraints](docs/circuit-constraints.md) — Formal constraint analysis
+- [Cross-chain Privacy](docs/cross-chain-privacy.md) — Domain-separated nullifiers and epoch sync
+- [Stealth Addresses](docs/stealth-addresses.md) — One-time address protocol
+- [Threat Model](docs/threat-model.md) — Trust assumptions and adversary models
+- [API Reference](docs/api-reference.md) — Full API docs for programs, SDK, and relayer
+- [Getting Started](docs/getting-started.md) — Setup guide
 ```
 
 Pages: Dashboard, Deposit, Transfer, Withdraw, Stealth Addresses, Cross-Chain Bridge, Compliance.

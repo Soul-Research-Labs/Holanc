@@ -1,18 +1,12 @@
-feat: comprehensive E2E integration tests (Phase 3)
+docs: README updates, SECURITY.md, CONTRIBUTING.md (Phase 4)
 
-Anchor integration tests for all 5 programs:
-- Verifier: VK init, IC point limit, invalid proof rejection
-- Nullifier: manager init, register, double-spend, v2 registration, epoch finalize
-- Bridge: init, publish/receive epoch root, lock/unlock, admin controls
-- Compliance: init, oracle, disclosure, revoke, wealth proof, deactivate
+README.md:
+- Updated Quick Start with SDK test and CLI commands
+- Merkle tree entry updated to mention on-chain SHA-256
+- Added Testing table (Cargo, Anchor, Jest, Next.js)
+- Added Docker section
+- Added Documentation section with links to all 8 docs
 
-Full-flow E2E test (7 stages):
-  Pool init -> 5 deposits -> Merkle root update -> Nullifier mgmt
-  -> Bridge -> Compliance -> Admin controls (pause/unpause)
-
-Rust crate test coverage (48 -> 60 tests):
-- stealth.rs: stealth_receive match/reject, unique ephemeral keys
-- note.rs: Note::new random blinding, nullifier key divergence
-- keys.rs: SpendingKey::from_bytes roundtrip, random uniqueness
-- commitment.rs: deposit_commitment, hash_pair non-commutativity
-- tree: Merkle proof verification, next_index/depth accessors
+New files:
+- SECURITY.md: vulnerability reporting, scope, security considerations
+- CONTRIBUTING.md: dev setup, workflow, code style, project areas
