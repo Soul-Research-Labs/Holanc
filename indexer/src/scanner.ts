@@ -5,6 +5,7 @@ import {
   ConfirmedSignatureInfo,
 } from "@solana/web3.js";
 import { NoteStore, IndexedNote } from "./store";
+import { ReplicatedNoteStore } from "./replicated-store";
 
 const POOL_PROGRAM_ID = new PublicKey(
   "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
@@ -184,9 +185,16 @@ function sleep(ms: number): Promise<void> {
 if (require.main === module) {
   const RPC_URL = process.env.SOLANA_RPC_URL || "http://127.0.0.1:8899";
   const DB_PATH = process.env.INDEXER_DB_PATH || "./holanc-indexer.db";
+  const REPLICA_PATHS = process.env.INDEXER_REPLICA_PATHS
+    ? process.env.INDEXER_REPLICA_PATHS.split(",").map((p) => p.trim())
+    : [];
 
-  const store = new NoteStore(DB_PATH);
-  const scanner = new NoteScanner(RPC_URL, store);
+  // Use replicated store when replica paths are configured
+  const store =
+    REPLICA_PATHS.length > 0
+      ? new ReplicatedNoteStore(DB_PATH, REPLICA_PATHS)
+      : new NoteStore(DB_PATH);
+  const scanner = new NoteScanner(RPC_URL, store as NoteStore);
 
   process.on("SIGINT", () => {
     console.log("\n[scanner] shutting down...");

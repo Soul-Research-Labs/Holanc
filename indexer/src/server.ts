@@ -1,5 +1,6 @@
 import http from "node:http";
 import { NoteStore, IndexedNote } from "./store";
+import { ReplicatedNoteStore } from "./replicated-store";
 import { NoteScanner } from "./scanner";
 
 const ALLOWED_ORIGINS = process.env.CORS_ORIGIN || "*";
@@ -148,10 +149,17 @@ if (require.main === module) {
   const RPC_URL = process.env.SOLANA_RPC_URL || "http://127.0.0.1:8899";
   const DB_PATH = process.env.INDEXER_DB_PATH || "./holanc-indexer.db";
   const PORT = parseInt(process.env.INDEXER_PORT || "3002", 10);
+  const REPLICA_PATHS = process.env.INDEXER_REPLICA_PATHS
+    ? process.env.INDEXER_REPLICA_PATHS.split(",").map((p) => p.trim())
+    : [];
 
-  const store = new NoteStore(DB_PATH);
-  const scanner = new NoteScanner(RPC_URL, store);
-  const server = createServer(store, PORT);
+  // Use replicated store when replica paths are configured for HA reads
+  const store =
+    REPLICA_PATHS.length > 0
+      ? new ReplicatedNoteStore(DB_PATH, REPLICA_PATHS)
+      : new NoteStore(DB_PATH);
+  const scanner = new NoteScanner(RPC_URL, store as NoteStore);
+  const server = createServer(store as NoteStore, PORT);
 
   process.on("SIGINT", () => {
     console.log("\n[indexer] shutting down...");
