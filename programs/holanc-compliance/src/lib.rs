@@ -2,6 +2,14 @@ use anchor_lang::prelude::*;
 
 declare_id!("8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE");
 
+/// Verifier program ID for CPI (same as holanc-pool uses).
+const VERIFIER_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+    0xea, 0x56, 0x05, 0x0b, 0xab, 0xf1, 0x5f, 0x69,
+    0xdd, 0xa7, 0x3b, 0x04, 0xa0, 0x8c, 0xd3, 0xa0,
+    0x53, 0x52, 0x09, 0xa1, 0xd4, 0x11, 0x22, 0x75,
+    0x13, 0x20, 0x07, 0xab, 0x3d, 0x64, 0x9a, 0x0b,
+]);
+
 /// Maximum number of compliance oracles that can be registered.
 pub const MAX_ORACLES: usize = 16;
 
@@ -77,6 +85,12 @@ pub mod holanc_compliance {
         let oracle = &ctx.accounts.oracle_record;
         require!(oracle.is_active, HolancComplianceError::OracleInactive);
 
+        // Enforce oracle permission: must have can_view to receive disclosures
+        require!(
+            oracle.permissions.can_view,
+            HolancComplianceError::OracleLacksPermission
+        );
+
         let disclosure = &mut ctx.accounts.disclosure_record;
         disclosure.pool = oracle.pool;
         disclosure.discloser = ctx.accounts.discloser.key();
@@ -131,19 +145,52 @@ pub mod holanc_compliance {
     ///
     /// Proves "my shielded balance is at least `threshold`" without revealing
     /// the exact amount. The proof is generated off-chain using the wealth
-    /// proof circuit and verified by holanc-verifier.
+    /// proof circuit and **verified on-chain** via CPI to holanc-verifier.
     pub fn submit_wealth_proof(
         ctx: Context<SubmitWealthProof>,
         threshold: u64,
-        proof_data: Vec<u8>,
+        proof_a: [u8; 64],
+        proof_b: [u8; 128],
+        proof_c: [u8; 64],
+        public_inputs: Vec<[u8; 32]>,
         circuit_type: u8,
     ) -> Result<()> {
+        // Enforce compliance mode: wealth proofs only in disclosure modes
+        let config = &ctx.accounts.compliance_config;
+        require!(
+            config.mode != ComplianceMode::Permissionless,
+            HolancComplianceError::ComplianceModeDisallows
+        );
+
+        // Verify the ZK proof via CPI to holanc-verifier before accepting.
+        verify_proof_cpi(
+            &ctx.accounts.verifier_program,
+            &ctx.accounts.verification_key,
+            &ctx.accounts.prover,
+            proof_a,
+            proof_b,
+            proof_c,
+            public_inputs.clone(),
+        )?;
+
+        // The first public input must encode the threshold for binding.
+        if let Some(first_input) = public_inputs.first() {
+            let mut threshold_bytes = [0u8; 32];
+            threshold_bytes[24..].copy_from_slice(&threshold.to_be_bytes());
+            require!(
+                *first_input == threshold_bytes,
+                HolancComplianceError::ThresholdMismatch
+            );
+        }
+
         let attestation = &mut ctx.accounts.wealth_attestation;
         attestation.pool = ctx.accounts.compliance_config.pool;
         attestation.prover = ctx.accounts.prover.key();
         attestation.threshold = threshold;
         let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
-        sha2::Digest::update(&mut hasher, &proof_data);
+        sha2::Digest::update(&mut hasher, &proof_a);
+        sha2::Digest::update(&mut hasher, &proof_b);
+        sha2::Digest::update(&mut hasher, &proof_c);
         let hash_result = sha2::Digest::finalize(hasher);
         attestation.proof_hash.copy_from_slice(&hash_result);
         attestation.circuit_type = circuit_type;
@@ -166,9 +213,11 @@ pub mod holanc_compliance {
         let attestation = &mut ctx.accounts.wealth_attestation;
         let now = Clock::get()?.unix_timestamp;
 
-        // Can be invalidated by the prover, or by authority if expired
-        let is_prover = attestation.prover == ctx.accounts.authority.key();
+        // Auto-invalidate expired proofs
         let is_expired = now > attestation.expiry;
+
+        // Can be invalidated by the prover, by authority, or auto if expired
+        let is_prover = attestation.prover == ctx.accounts.authority.key();
         let is_admin = ctx.accounts.compliance_config.authority == ctx.accounts.authority.key();
 
         require!(
@@ -181,6 +230,27 @@ pub mod holanc_compliance {
         emit!(WealthProofInvalidated {
             pool: attestation.pool,
             prover: attestation.prover,
+        });
+
+        Ok(())
+    }
+
+    /// Query-time validation: check if a wealth attestation is still valid.
+    /// Rejects expired proofs even if is_valid flag hasn't been flipped yet.
+    pub fn validate_wealth_proof(ctx: Context<ValidateWealthProof>) -> Result<()> {
+        let attestation = &ctx.accounts.wealth_attestation;
+        let now = Clock::get()?.unix_timestamp;
+
+        require!(attestation.is_valid, HolancComplianceError::ProofInvalidated);
+        require!(
+            now <= attestation.expiry,
+            HolancComplianceError::ProofExpired
+        );
+
+        emit!(WealthProofValidated {
+            pool: attestation.pool,
+            prover: attestation.prover,
+            threshold: attestation.threshold,
         });
 
         Ok(())
@@ -340,6 +410,15 @@ pub struct SubmitWealthProof<'info> {
     )]
     pub wealth_attestation: Account<'info, WealthAttestation>,
 
+    /// The holanc-verifier program for proof CPI.
+    /// CHECK: Verified by address constraint.
+    #[account(address = VERIFIER_PROGRAM_ID)]
+    pub verifier_program: AccountInfo<'info>,
+
+    /// The verification key account for the wealth proof circuit.
+    /// CHECK: Owned by the verifier program.
+    pub verification_key: AccountInfo<'info>,
+
     #[account(mut)]
     pub prover: Signer<'info>,
 
@@ -364,6 +443,11 @@ pub struct DeactivateOracle<'info> {
     pub oracle_record: Account<'info, OracleRecord>,
 
     pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ValidateWealthProof<'info> {
+    pub wealth_attestation: Account<'info, WealthAttestation>,
 }
 
 // ---------------------------------------------------------------------------
@@ -474,9 +558,73 @@ pub struct WealthProofInvalidated {
 }
 
 #[event]
+pub struct WealthProofValidated {
+    pub pool: Pubkey,
+    pub prover: Pubkey,
+    pub threshold: u64,
+}
+
+#[event]
 pub struct OracleDeactivated {
     pub pool: Pubkey,
     pub oracle: Pubkey,
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// CPI to holanc-verifier's verify_proof instruction.
+fn verify_proof_cpi<'info>(
+    verifier_program: &AccountInfo<'info>,
+    verification_key: &AccountInfo<'info>,
+    prover: &Signer<'info>,
+    proof_a: [u8; 64],
+    proof_b: [u8; 128],
+    proof_c: [u8; 64],
+    public_inputs: Vec<[u8; 32]>,
+) -> Result<()> {
+    use anchor_lang::solana_program::instruction::Instruction;
+    use anchor_lang::solana_program::program::invoke;
+
+    // Anchor discriminator for "verify_proof" = first 8 bytes of SHA256("global:verify_proof")
+    let discriminator: [u8; 8] = [0xd9, 0xd3, 0xbf, 0x6e, 0x90, 0x0d, 0xba, 0x62];
+
+    let mut data = Vec::with_capacity(8 + 64 + 128 + 64 + 4 + public_inputs.len() * 32);
+    data.extend_from_slice(&discriminator);
+    data.extend_from_slice(&proof_a);
+    data.extend_from_slice(&proof_b);
+    data.extend_from_slice(&proof_c);
+    data.extend_from_slice(&(public_inputs.len() as u32).to_le_bytes());
+    for input in &public_inputs {
+        data.extend_from_slice(input);
+    }
+
+    let ix = Instruction {
+        program_id: *verifier_program.key,
+        accounts: vec![
+            anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                *verification_key.key,
+                false,
+            ),
+            anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                *prover.key,
+                true,
+            ),
+        ],
+        data,
+    };
+
+    invoke(
+        &ix,
+        &[
+            verification_key.clone(),
+            prover.to_account_info(),
+            verifier_program.clone(),
+        ],
+    )?;
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -495,4 +643,16 @@ pub enum HolancComplianceError {
     NotDiscloser,
     #[msg("Disclosure already revoked")]
     AlreadyRevoked,
+    #[msg("Wealth proof ZK verification failed")]
+    ProofVerificationFailed,
+    #[msg("Threshold in public inputs does not match declared threshold")]
+    ThresholdMismatch,
+    #[msg("Oracle does not have the required permission")]
+    OracleLacksPermission,
+    #[msg("Compliance mode does not allow this operation")]
+    ComplianceModeDisallows,
+    #[msg("Wealth proof has been invalidated")]
+    ProofInvalidated,
+    #[msg("Wealth proof has expired")]
+    ProofExpired,
 }
