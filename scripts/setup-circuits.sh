@@ -22,7 +22,7 @@ PTAU_SIZE=16
 PTAU_FILE="$PTAU_DIR/powersOfTau28_bnbn128_${PTAU_SIZE}.ptau"
 PTAU_URL="https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_bnbn128_final_${PTAU_SIZE}.ptau"
 
-CIRCUITS=("deposit" "transfer" "withdraw" "transfer_v2" "withdraw_v2" "stealth_transfer" "wealth_proof" "transfer_4x4" "withdraw_4x4")
+CIRCUITS=("deposit" "transfer" "withdraw" "transfer_v2" "withdraw_v2" "stealth_transfer" "wealth_proof" "transfer_4x4" "withdraw_4x4" "withdraw_v2_4x4")
 
 # Color output
 RED='\033[0;31m'
