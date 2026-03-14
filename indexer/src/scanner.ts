@@ -4,8 +4,21 @@ import {
   ParsedTransactionWithMeta,
   ConfirmedSignatureInfo,
 } from "@solana/web3.js";
+import crypto from "crypto";
 import { NoteStore, IndexedNote } from "./store";
 import { ReplicatedNoteStore } from "./replicated-store";
+
+/**
+ * Pre-compute Anchor event discriminators: SHA-256("event:<Name>")[0..8].
+ * These are used to identify which event type a program log entry represents.
+ */
+function anchorEventDiscriminator(name: string): Buffer {
+  const hash = crypto.createHash("sha256").update(`event:${name}`).digest();
+  return hash.subarray(0, 8);
+}
+
+const DISC_NEW_COMMITMENT = anchorEventDiscriminator("NewCommitment");
+const DISC_DEPOSIT_EVENT = anchorEventDiscriminator("DepositEvent");
 
 const POOL_PROGRAM_ID = new PublicKey(
   "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
@@ -137,18 +150,37 @@ export class NoteScanner {
 
         const discriminator = data.subarray(0, 8);
 
-        // NewCommitment discriminator: first 8 bytes of SHA256("event:NewCommitment")
-        // We check both NewCommitment and DepositEvent
-        const leafIndex = data.readUInt32LE(8);
-        const commitment = data.subarray(12, 44).toString("hex");
+        // Validate the discriminator matches a known commitment event type.
+        // Reject unknown events to prevent misinterpreting unrelated program data.
+        const isNewCommitment = discriminator.equals(DISC_NEW_COMMITMENT);
+        const isDeposit = discriminator.equals(DISC_DEPOSIT_EVENT);
+        if (!isNewCommitment && !isDeposit) continue;
+
+        // NewCommitment: disc(8) + pool(32) + leaf_index(4) + commitment(32) + encrypted_note(vec)
+        // DepositEvent:  disc(8) + pool(32) + leaf_index(4) + commitment(32) + amount(8) + encrypted_note(vec)
+        // Both have pool pubkey first, then leaf_index, then commitment
+        const poolOffset = 8;       // skip discriminator
+        const leafIdxOffset = 8 + 32; // after pool pubkey
+        const commitmentOffset = 8 + 32 + 4;
+
+        if (data.length < commitmentOffset + 32) continue;
+
+        const leafIndex = data.readUInt32LE(leafIdxOffset);
+        const commitment = data.subarray(commitmentOffset, commitmentOffset + 32).toString("hex");
+
+        // Encrypted note offset varies by event type
+        const noteDataStart = isDeposit
+          ? commitmentOffset + 32 + 8  // commitment + amount(u64)
+          : commitmentOffset + 32;     // commitment only
+
 
         // Remaining bytes are the encrypted note (variable length)
         // Vec<u8> encoding: 4-byte LE length prefix + data
         let encryptedNote = "";
-        if (data.length > 44 + 4) {
-          const noteLen = data.readUInt32LE(44);
-          if (noteLen > 0 && noteLen <= 256 && data.length >= 48 + noteLen) {
-            encryptedNote = data.subarray(48, 48 + noteLen).toString("hex");
+        if (data.length > noteDataStart + 4) {
+          const noteLen = data.readUInt32LE(noteDataStart);
+          if (noteLen > 0 && noteLen <= 256 && data.length >= noteDataStart + 4 + noteLen) {
+            encryptedNote = data.subarray(noteDataStart + 4, noteDataStart + 4 + noteLen).toString("hex");
           }
         }
 
