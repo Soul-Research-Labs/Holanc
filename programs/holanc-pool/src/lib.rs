@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use sha2::{Digest, Sha256};
 
 declare_id!("6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT");
 
@@ -18,6 +19,24 @@ const BRIDGE_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
     0xa6, 0x39, 0x71, 0x0c, 0xfd, 0x82, 0x5e, 0xb4,
     0x19, 0x20, 0xca, 0x3d, 0x7f, 0x56, 0xa1, 0x08,
 ]);
+
+/// Nullifier registry program ID for CPI (holanc-nullifier).
+const NULLIFIER_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+    0x9d, 0x72, 0xa2, 0x6f, 0x55, 0x5a, 0x10, 0x01,
+    0x4c, 0x26, 0x15, 0xdb, 0xb0, 0xaa, 0x8f, 0x1f,
+    0x4e, 0x5a, 0x27, 0x62, 0x41, 0x55, 0x33, 0x3a,
+    0xc7, 0x8d, 0x90, 0xc1, 0x97, 0x00, 0xd3, 0x1b,
+]);
+
+/// Derive an Anchor instruction discriminator at runtime.
+/// discriminator = SHA256("global:<name>")[0..8]
+fn anchor_discriminator(name: &str) -> [u8; 8] {
+    let input = format!("global:{name}");
+    let hash = Sha256::digest(input.as_bytes());
+    let mut disc = [0u8; 8];
+    disc.copy_from_slice(&hash[..8]);
+    disc
+}
 
 /// Merkle tree depth for the commitment tree.
 pub const TREE_DEPTH: usize = 20;
@@ -175,12 +194,12 @@ pub mod holanc_pool {
         // if that account exists and is_unlocked == false, the note is frozen.
         assert_not_bridge_locked(
             &ctx.accounts.commitment_lock_1,
-            &ctx.accounts.pool.key(),
+            &pool_key,
             &nullifiers[0],
         )?;
         assert_not_bridge_locked(
             &ctx.accounts.commitment_lock_2,
-            &ctx.accounts.pool.key(),
+            &pool_key,
             &nullifiers[1],
         )?;
 
@@ -205,14 +224,15 @@ pub mod holanc_pool {
             public_inputs,
         )?;
 
-        // Check nullifiers haven't been spent
-        let nullifier_registry = &mut ctx.accounts.nullifier_registry;
+        // Register nullifiers via CPI to holanc-nullifier program (bitmap O(1) lookup)
         for nf in &nullifiers {
-            require!(
-                !nullifier_registry.is_spent(nf),
-                HolancPoolError::NullifierAlreadySpent
-            );
-            nullifier_registry.mark_spent(nf)?;
+            register_nullifier_cpi(
+                &ctx.accounts.nullifier_program,
+                &ctx.accounts.nullifier_manager,
+                &ctx.accounts.nullifier_page,
+                &ctx.accounts.authority,
+                nf,
+            )?;
         }
 
         // Append output commitments
@@ -295,12 +315,12 @@ pub mod holanc_pool {
         // Reject if any input commitment is locked for bridge transfer.
         assert_not_bridge_locked(
             &ctx.accounts.commitment_lock_1,
-            &ctx.accounts.pool.key(),
+            &pool_key,
             &nullifiers[0],
         )?;
         assert_not_bridge_locked(
             &ctx.accounts.commitment_lock_2,
-            &ctx.accounts.pool.key(),
+            &pool_key,
             &nullifiers[1],
         )?;
 
@@ -328,14 +348,15 @@ pub mod holanc_pool {
             public_inputs,
         )?;
 
-        // Check and register nullifiers
-        let nullifier_registry = &mut ctx.accounts.nullifier_registry;
+        // Register nullifiers via CPI to holanc-nullifier program (bitmap O(1) lookup)
         for nf in &nullifiers {
-            require!(
-                !nullifier_registry.is_spent(nf),
-                HolancPoolError::NullifierAlreadySpent
-            );
-            nullifier_registry.mark_spent(nf)?;
+            register_nullifier_cpi(
+                &ctx.accounts.nullifier_program,
+                &ctx.accounts.nullifier_manager,
+                &ctx.accounts.nullifier_page,
+                &ctx.accounts.authority,
+                nf,
+            )?;
         }
 
         // Transfer tokens from vault to recipient
@@ -534,8 +555,8 @@ fn verify_proof_cpi<'info>(
     use anchor_lang::solana_program::program::invoke;
 
     // Build the verify_proof instruction data manually
-    // Anchor discriminator for "verify_proof" = first 8 bytes of SHA256("global:verify_proof")
-    let discriminator: [u8; 8] = [0xd9, 0xd3, 0xbf, 0x6e, 0x90, 0x0d, 0xba, 0x62];
+    // Anchor discriminator derived from SHA256("global:verify_proof")[0..8]
+    let discriminator = anchor_discriminator("verify_proof");
 
     let mut data = Vec::with_capacity(8 + 64 + 128 + 64 + 4 + public_inputs.len() * 32);
     data.extend_from_slice(&discriminator);
@@ -569,6 +590,58 @@ fn verify_proof_cpi<'info>(
             verification_key.clone(),
             authority.to_account_info(),
             verifier_program.clone(),
+        ],
+    )?;
+
+    Ok(())
+}
+
+/// CPI to holanc-nullifier's register_nullifier instruction.
+///
+/// Replaces the inline NullifierRegistry (Vec-based, O(n)) with the dedicated
+/// nullifier program's bitmap-based registry (O(1) lookup).
+fn register_nullifier_cpi<'info>(
+    nullifier_program: &AccountInfo<'info>,
+    nullifier_manager: &AccountInfo<'info>,
+    nullifier_page: &AccountInfo<'info>,
+    authority: &Signer<'info>,
+    nullifier: &[u8; 32],
+) -> Result<()> {
+    use anchor_lang::solana_program::instruction::Instruction;
+    use anchor_lang::solana_program::program::invoke;
+
+    let discriminator = anchor_discriminator("register_nullifier");
+
+    let mut data = Vec::with_capacity(8 + 32);
+    data.extend_from_slice(&discriminator);
+    data.extend_from_slice(nullifier);
+
+    let ix = Instruction {
+        program_id: *nullifier_program.key,
+        accounts: vec![
+            anchor_lang::solana_program::instruction::AccountMeta::new(
+                *nullifier_manager.key,
+                false,
+            ),
+            anchor_lang::solana_program::instruction::AccountMeta::new(
+                *nullifier_page.key,
+                false,
+            ),
+            anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                *authority.key,
+                true,
+            ),
+        ],
+        data,
+    };
+
+    invoke(
+        &ix,
+        &[
+            nullifier_manager.clone(),
+            nullifier_page.clone(),
+            authority.to_account_info(),
+            nullifier_program.clone(),
         ],
     )?;
 
@@ -641,9 +714,6 @@ pub struct PrivateTransfer<'info> {
     pub pool: Account<'info, PoolState>,
 
     #[account(mut)]
-    pub nullifier_registry: Account<'info, NullifierRegistry>,
-
-    #[account(mut)]
     pub vault: Account<'info, TokenAccount>,
 
     /// CHECK: PDA authority over vault.
@@ -661,6 +731,21 @@ pub struct PrivateTransfer<'info> {
     /// The verification key account for the transfer circuit.
     /// CHECK: Owned by the verifier program.
     pub verification_key: AccountInfo<'info>,
+
+    /// The holanc-nullifier program for nullifier registration CPI.
+    /// CHECK: Verified by address constraint.
+    #[account(address = NULLIFIER_PROGRAM_ID)]
+    pub nullifier_program: AccountInfo<'info>,
+
+    /// The nullifier manager account (PDA of holanc-nullifier program).
+    /// CHECK: Owned by the nullifier program; validated during CPI.
+    #[account(mut)]
+    pub nullifier_manager: AccountInfo<'info>,
+
+    /// The nullifier bitmap page account.
+    /// CHECK: Owned by the nullifier program; validated during CPI.
+    #[account(mut)]
+    pub nullifier_page: AccountInfo<'info>,
 
     pub authority: Signer<'info>,
 
@@ -680,9 +765,6 @@ pub struct PrivateTransfer<'info> {
 pub struct Withdraw<'info> {
     #[account(mut)]
     pub pool: Account<'info, PoolState>,
-
-    #[account(mut)]
-    pub nullifier_registry: Account<'info, NullifierRegistry>,
 
     #[account(mut)]
     pub vault: Account<'info, TokenAccount>,
@@ -705,6 +787,21 @@ pub struct Withdraw<'info> {
     /// The verification key account for the withdraw circuit.
     /// CHECK: Owned by the verifier program.
     pub verification_key: AccountInfo<'info>,
+
+    /// The holanc-nullifier program for nullifier registration CPI.
+    /// CHECK: Verified by address constraint.
+    #[account(address = NULLIFIER_PROGRAM_ID)]
+    pub nullifier_program: AccountInfo<'info>,
+
+    /// The nullifier manager account (PDA of holanc-nullifier program).
+    /// CHECK: Owned by the nullifier program; validated during CPI.
+    #[account(mut)]
+    pub nullifier_manager: AccountInfo<'info>,
+
+    /// The nullifier bitmap page account.
+    /// CHECK: Owned by the nullifier program; validated during CPI.
+    #[account(mut)]
+    pub nullifier_page: AccountInfo<'info>,
 
     pub authority: Signer<'info>,
 
@@ -777,30 +874,9 @@ impl PoolState {
         + 32;       // sha256_root
 }
 
-/// Inline nullifier registry for MVP.
-/// In production this would be a separate program (holanc-nullifier).
-#[account]
-pub struct NullifierRegistry {
-    pub nullifiers: Vec<[u8; 32]>,
-}
-
-impl NullifierRegistry {
-    pub fn is_spent(&self, nf: &[u8; 32]) -> bool {
-        // Constant-time comparison to prevent timing side-channels
-        self.nullifiers.iter().any(|stored| {
-            let mut acc = 0u8;
-            for (a, b) in stored.iter().zip(nf.iter()) {
-                acc |= a ^ b;
-            }
-            acc == 0
-        })
-    }
-
-    pub fn mark_spent(&mut self, nf: &[u8; 32]) -> Result<()> {
-        self.nullifiers.push(*nf);
-        Ok(())
-    }
-}
+// The inline NullifierRegistry has been removed in favour of CPI to the
+// holanc-nullifier program, which provides O(1) bitmap-based lookups.
+// See register_nullifier_cpi() above.
 
 // ---------------------------------------------------------------------------
 // Events
