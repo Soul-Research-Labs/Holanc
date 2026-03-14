@@ -65,6 +65,38 @@ export class NoteStore {
     );
   }
 
+  /**
+   * Atomically insert notes and update the last-processed signature.
+   *
+   * Using a single SQLite transaction ensures that if the indexer crashes
+   * mid-batch, neither the notes nor the checkpoint are committed, so on
+   * restart the batch is replayed from the previous checkpoint.
+   */
+  insertNotesAtomic(notes: IndexedNote[], lastSignature: string): void {
+    const insertStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO notes (commitment, leaf_index, encrypted_note, tx_signature, slot, block_time)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const sigStmt = this.db.prepare(
+      "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_signature', ?)",
+    );
+
+    const txn = this.db.transaction(() => {
+      for (const note of notes) {
+        insertStmt.run(
+          note.commitment,
+          note.leafIndex,
+          note.encryptedNote,
+          note.txSignature,
+          note.slot,
+          note.blockTime,
+        );
+      }
+      sigStmt.run(lastSignature);
+    });
+    txn();
+  }
+
   /** Get notes by leaf index range (inclusive). */
   getNotesByRange(fromLeaf: number, toLeaf: number): IndexedNote[] {
     const stmt = this.db.prepare(`

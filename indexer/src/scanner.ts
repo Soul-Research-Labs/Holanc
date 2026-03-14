@@ -98,6 +98,12 @@ export class NoteScanner {
     const ordered = signatures.reverse();
     console.log(`[scanner] processing ${ordered.length} new transactions`);
 
+    // Collect all notes from this poll cycle, then persist atomically
+    // with the last-processed signature. This prevents partial commits
+    // if the process crashes mid-batch.
+    const pendingNotes: IndexedNote[] = [];
+    let newLastSignature: string | undefined;
+
     for (const sigInfo of ordered) {
       if (sigInfo.err) continue; // skip failed txs
 
@@ -107,7 +113,8 @@ export class NoteScanner {
           { maxSupportedTransactionVersion: 0 },
         );
         if (tx) {
-          this.extractNotes(tx, sigInfo.signature);
+          const notes = this.extractNotes(tx, sigInfo.signature);
+          pendingNotes.push(...notes);
         }
       } catch (err) {
         console.error(
@@ -116,8 +123,13 @@ export class NoteScanner {
         );
       }
 
-      this.lastSignature = sigInfo.signature;
-      this.store.setLastSignature(sigInfo.signature);
+      newLastSignature = sigInfo.signature;
+    }
+
+    // Atomic commit: notes + checkpoint in a single SQLite transaction
+    if (newLastSignature) {
+      this.store.insertNotesAtomic(pendingNotes, newLastSignature);
+      this.lastSignature = newLastSignature;
     }
   }
 
@@ -130,12 +142,16 @@ export class NoteScanner {
    *
    * We parse the base64-encoded event data from program logs.
    */
-  private extractNotes(tx: ParsedTransactionWithMeta, signature: string): void {
+  private extractNotes(
+    tx: ParsedTransactionWithMeta,
+    signature: string,
+  ): IndexedNote[] {
     const logs = tx.meta?.logMessages;
-    if (!logs) return;
+    if (!logs) return [];
 
     const slot = tx.slot;
     const blockTime = tx.blockTime ?? Math.floor(Date.now() / 1000);
+    const extracted: IndexedNote[] = [];
 
     // Anchor events are emitted as base64 in "Program data:" log lines
     for (const log of logs) {
@@ -159,28 +175,35 @@ export class NoteScanner {
         // NewCommitment: disc(8) + pool(32) + leaf_index(4) + commitment(32) + encrypted_note(vec)
         // DepositEvent:  disc(8) + pool(32) + leaf_index(4) + commitment(32) + amount(8) + encrypted_note(vec)
         // Both have pool pubkey first, then leaf_index, then commitment
-        const poolOffset = 8;       // skip discriminator
+        const poolOffset = 8; // skip discriminator
         const leafIdxOffset = 8 + 32; // after pool pubkey
         const commitmentOffset = 8 + 32 + 4;
 
         if (data.length < commitmentOffset + 32) continue;
 
         const leafIndex = data.readUInt32LE(leafIdxOffset);
-        const commitment = data.subarray(commitmentOffset, commitmentOffset + 32).toString("hex");
+        const commitment = data
+          .subarray(commitmentOffset, commitmentOffset + 32)
+          .toString("hex");
 
         // Encrypted note offset varies by event type
         const noteDataStart = isDeposit
-          ? commitmentOffset + 32 + 8  // commitment + amount(u64)
-          : commitmentOffset + 32;     // commitment only
-
+          ? commitmentOffset + 32 + 8 // commitment + amount(u64)
+          : commitmentOffset + 32; // commitment only
 
         // Remaining bytes are the encrypted note (variable length)
         // Vec<u8> encoding: 4-byte LE length prefix + data
         let encryptedNote = "";
         if (data.length > noteDataStart + 4) {
           const noteLen = data.readUInt32LE(noteDataStart);
-          if (noteLen > 0 && noteLen <= 256 && data.length >= noteDataStart + 4 + noteLen) {
-            encryptedNote = data.subarray(noteDataStart + 4, noteDataStart + 4 + noteLen).toString("hex");
+          if (
+            noteLen > 0 &&
+            noteLen <= 256 &&
+            data.length >= noteDataStart + 4 + noteLen
+          ) {
+            encryptedNote = data
+              .subarray(noteDataStart + 4, noteDataStart + 4 + noteLen)
+              .toString("hex");
           }
         }
 
@@ -193,7 +216,7 @@ export class NoteScanner {
           blockTime,
         };
 
-        this.store.insertNote(note);
+        extracted.push(note);
         console.log(
           `[scanner] indexed commitment leaf=${leafIndex} tx=${signature.slice(
             0,
@@ -204,6 +227,8 @@ export class NoteScanner {
         // Not a parseable event — skip
       }
     }
+
+    return extracted;
   }
 }
 
