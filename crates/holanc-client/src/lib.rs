@@ -18,6 +18,8 @@ pub enum WalletError {
     NoUnspentNotes,
     #[error("Note not found at index {0}")]
     NoteNotFound(u64),
+    #[error("Wallet persistence failed: {0}")]
+    PersistenceFailed(String),
 }
 
 /// Transaction record for wallet history.
@@ -300,6 +302,67 @@ impl Wallet {
             }
         }
     }
+
+    /// Save the wallet state to an encrypted file.
+    ///
+    /// The spending key is used to derive the encryption key via HKDF.
+    /// Format: 12-byte nonce || ciphertext (ChaCha20-Poly1305)
+    pub fn save(&self, path: &std::path::Path) -> Result<(), WalletError> {
+        let state = WalletState {
+            spending_key: *self.spending_key.as_bytes(),
+            notes: self.notes.clone(),
+            history: self.history.clone(),
+            asset_id: self.asset_id,
+        };
+        let plaintext = serde_json::to_vec(&state)
+            .map_err(|e| WalletError::PersistenceFailed(e.to_string()))?;
+
+        let (ciphertext, nonce) =
+            holanc_note::encryption::encrypt_note(self.spending_key.as_bytes(), &plaintext)
+                .map_err(|e| WalletError::PersistenceFailed(e.to_string()))?;
+
+        let mut out = Vec::with_capacity(12 + ciphertext.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ciphertext);
+
+        std::fs::write(path, &out)
+            .map_err(|e| WalletError::PersistenceFailed(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Load wallet state from an encrypted file.
+    ///
+    /// The provided spending key decrypts the file. Fails if the key is wrong.
+    pub fn load(path: &std::path::Path, spending_key: SpendingKey) -> Result<Self, WalletError> {
+        let data = std::fs::read(path)
+            .map_err(|e| WalletError::PersistenceFailed(e.to_string()))?;
+        if data.len() < 12 {
+            return Err(WalletError::PersistenceFailed("file too short".into()));
+        }
+        let nonce: [u8; 12] = data[..12].try_into().unwrap();
+        let ciphertext = &data[12..];
+
+        let plaintext =
+            holanc_note::encryption::decrypt_note(spending_key.as_bytes(), ciphertext, &nonce)
+                .map_err(|_| WalletError::PersistenceFailed("decryption failed (wrong key?)".into()))?;
+
+        let state: WalletState = serde_json::from_slice(&plaintext)
+            .map_err(|e| WalletError::PersistenceFailed(e.to_string()))?;
+
+        let mut wallet = Wallet::new(spending_key);
+        wallet.notes = state.notes;
+        wallet.history = state.history;
+        wallet.asset_id = state.asset_id;
+
+        // Rebuild the Merkle tree from persisted notes
+        for note in &wallet.notes {
+            if let Some(_) = note.leaf_index {
+                let _ = wallet.tree.append(*note.commitment().as_bytes());
+            }
+        }
+
+        Ok(wallet)
+    }
 }
 
 /// Prepared transfer data, ready for proof generation.
@@ -317,6 +380,15 @@ pub struct PreparedWithdraw {
     pub input_proofs: [holanc_tree::MerkleProof; 2],
     pub exit_value: u64,
     pub fee: u64,
+}
+
+/// Serializable wallet state for encrypted persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WalletState {
+    spending_key: [u8; 32],
+    notes: Vec<Note>,
+    history: Vec<TxRecord>,
+    asset_id: [u8; 32],
 }
 
 #[cfg(test)]
