@@ -21,6 +21,7 @@ pub mod holanc_compliance {
     pub fn initialize(
         ctx: Context<InitializeCompliance>,
         compliance_mode: ComplianceMode,
+        proof_expiry_seconds: Option<i64>,
     ) -> Result<()> {
         let config = &mut ctx.accounts.compliance_config;
         config.authority = ctx.accounts.authority.key();
@@ -29,6 +30,7 @@ pub mod holanc_compliance {
         config.oracle_count = 0;
         config.total_disclosures = 0;
         config.is_active = true;
+        config.proof_expiry_seconds = proof_expiry_seconds.unwrap_or(86_400);
         config.bump = ctx.bumps.compliance_config;
         Ok(())
     }
@@ -196,7 +198,7 @@ pub mod holanc_compliance {
         attestation.circuit_type = circuit_type;
         attestation.attested_at = Clock::get()?.unix_timestamp;
         attestation.is_valid = true;
-        attestation.expiry = Clock::get()?.unix_timestamp + 86_400; // 24h validity
+        attestation.expiry = Clock::get()?.unix_timestamp + config.proof_expiry_seconds;
 
         emit!(WealthProofSubmitted {
             pool: attestation.pool,
@@ -253,6 +255,19 @@ pub mod holanc_compliance {
             threshold: attestation.threshold,
         });
 
+        Ok(())
+    }
+
+    /// Update the proof expiry duration (admin only).
+    pub fn update_proof_expiry(
+        ctx: Context<UpdateProofExpiry>,
+        proof_expiry_seconds: i64,
+    ) -> Result<()> {
+        require!(
+            proof_expiry_seconds > 0,
+            HolancComplianceError::InvalidExpiry
+        );
+        ctx.accounts.compliance_config.proof_expiry_seconds = proof_expiry_seconds;
         Ok(())
     }
 
@@ -335,6 +350,18 @@ pub struct InitializeCompliance<'info> {
     pub authority: Signer<'info>,
 
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(proof_expiry_seconds: i64)]
+pub struct UpdateProofExpiry<'info> {
+    #[account(
+        mut,
+        has_one = authority,
+    )]
+    pub compliance_config: Account<'info, ComplianceConfig>,
+
+    pub authority: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -462,11 +489,12 @@ pub struct ComplianceConfig {
     pub oracle_count: u8,
     pub total_disclosures: u64,
     pub is_active: bool,
+    pub proof_expiry_seconds: i64,
     pub bump: u8,
 }
 
 impl ComplianceConfig {
-    pub const MAX_SIZE: usize = 32 + 32 + 1 + 1 + 8 + 1 + 1; // 76
+    pub const MAX_SIZE: usize = 32 + 32 + 1 + 1 + 8 + 1 + 8 + 1; // 84
 }
 
 #[account]
@@ -655,4 +683,6 @@ pub enum HolancComplianceError {
     ProofInvalidated,
     #[msg("Wealth proof has expired")]
     ProofExpired,
+    #[msg("Proof expiry must be positive")]
+    InvalidExpiry,
 }
