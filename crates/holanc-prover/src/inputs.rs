@@ -216,8 +216,22 @@ pub fn build_wealth_proof_input(params: &WealthProofParams) -> Result<Value, Pro
         }
     }
 
+    // Compute owner_commitment = Poseidon(spending_key) for identity binding.
+    // The circuit verifies this matches the public input.
+    let owner_commitment = holanc_primitives::poseidon::poseidon_hash_multi(&[params.spending_key])
+        .map_err(|e| ProverError::InputGenerationFailed(format!("owner commitment hash failed: {e}")))?;
+
+    // Use the first proof's root, or zero root if no proofs provided.
+    let merkle_root = params
+        .input_proofs
+        .first()
+        .map(|p| p.root)
+        .unwrap_or([0u8; 32]);
+
     Ok(json!({
         "spending_key": bytes_to_decimal(&params.spending_key),
+        "merkle_root": bytes_to_decimal(&merkle_root),
+        "owner_commitment": bytes_to_decimal(&owner_commitment),
         "note_value": note_values,
         "note_blinding": note_blindings,
         "note_asset_id": note_asset_ids,
