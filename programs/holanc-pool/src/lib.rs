@@ -348,6 +348,19 @@ pub mod holanc_pool {
             public_inputs,
         )?;
 
+        // Validate pool has sufficient balance before CPI to avoid wasting compute.
+        require!(
+            exit_amount <= pool.total_deposited,
+            HolancPoolError::InsufficientPoolBalance
+        );
+        require!(
+            exit_amount
+                .checked_add(fee)
+                .ok_or(HolancPoolError::Overflow)?
+                <= pool.total_deposited,
+            HolancPoolError::InsufficientPoolBalance
+        );
+
         // Register nullifiers via CPI to holanc-nullifier program (bitmap O(1) lookup)
         for nf in &nullifiers {
             register_nullifier_cpi(
