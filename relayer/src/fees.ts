@@ -29,6 +29,8 @@ export class FeeEstimator {
 
   /** Cache duration for priority fee lookups. */
   private cacheDurationMs = 30_000;
+  /** Timeout for individual RPC calls (ms). */
+  private rpcTimeoutMs = 5_000;
   private cachedPriorityFee: number | null = null;
   private cacheTimestamp = 0;
 
@@ -62,7 +64,10 @@ export class FeeEstimator {
     }
 
     try {
-      const fees = await this.connection.getRecentPrioritizationFees();
+      const fees = await raceTimeout(
+        this.connection.getRecentPrioritizationFees(),
+        this.rpcTimeoutMs,
+      );
       if (fees.length === 0) {
         this.cachedPriorityFee = 0;
       } else {
@@ -73,11 +78,22 @@ export class FeeEstimator {
         this.cachedPriorityFee = sorted[Math.floor(sorted.length / 2)];
       }
     } catch {
-      // Default to 0 if RPC fails
+      // Default to 0 if RPC fails or times out
       this.cachedPriorityFee = 0;
     }
 
     this.cacheTimestamp = now;
     return this.cachedPriorityFee;
   }
+}
+
+/** Race a promise against a timeout; rejects with an error on expiry. */
+function raceTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`RPC timeout after ${ms}ms`)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
