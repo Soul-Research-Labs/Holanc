@@ -19,73 +19,63 @@ describe("stealth addresses", () => {
     stealth = await import("../../sdk/typescript/src/stealth");
   });
 
-  it("stealthSend generates valid ephemeral key and stealth owner", async () => {
-    const recipientSpendPubkey = "ab".repeat(32);
-    const recipientViewPubkey = "cd".repeat(32);
-
-    const meta = {
-      spendingPubkey: recipientSpendPubkey,
-      viewingPubkey: recipientViewPubkey,
-    };
-    const result = await stealth.stealthSend(meta);
-
-    assert.isString(result.ephemeralPubkey);
-    assert.isString(result.stealthOwner);
-    assert.isString(result.sharedSecret);
-    assert.lengthOf(
-      result.ephemeralPubkey,
-      64,
-      "ephemeralPubkey should be 32 bytes hex",
-    );
-    assert.lengthOf(
-      result.stealthOwner,
-      64,
-      "stealthOwner should be 32 bytes hex",
-    );
+  it("generates a BabyJubJub keypair for stealth meta-address", async () => {
+    const { secretKey, publicKey } = await stealth.generateBjjKeypair();
+    assert.lengthOf(secretKey, 64, "Secret key should be 32 bytes hex");
+    assert.lengthOf(publicKey[0], 64, "Public key x should be 32 bytes hex");
+    assert.lengthOf(publicKey[1], 64, "Public key y should be 32 bytes hex");
   });
 
-  it("stealthScan returns expected shape from matching scan", async () => {
-    const recipientSpendPubkey = "ab".repeat(32);
-    const recipientViewPubkey = "cd".repeat(32);
-    const meta = {
-      spendingPubkey: recipientSpendPubkey,
-      viewingPubkey: recipientViewPubkey,
-    };
+  it("stealthSend generates valid ephemeral pubkey point and stealth owner", async () => {
+    const { secretKey, publicKey: viewingPubkey } =
+      await stealth.generateBjjKeypair();
+    const spendingPubkey = "ab".repeat(32);
 
+    const meta = { spendingPubkey, viewingPubkey };
+    const result = await stealth.stealthSend(meta);
+
+    assert.isArray(result.ephemeralPubkey);
+    assert.lengthOf(result.ephemeralPubkey, 2, "Ephemeral pubkey should be [x, y]");
+    assert.isString(result.stealthOwner);
+    assert.isString(result.sharedSecret);
+    assert.lengthOf(result.stealthOwner, 64, "stealthOwner should be 32 bytes hex");
+  });
+
+  it("stealthScan correctly identifies own notes via ECDH", async () => {
+    const { secretKey: viewingKey, publicKey: viewingPubkey } =
+      await stealth.generateBjjKeypair();
+    const spendingPubkey = "ab".repeat(32);
+
+    const meta = { spendingPubkey, viewingPubkey };
     const sendResult = await stealth.stealthSend(meta);
 
-    // The recipient scans with their view key.
-    // Note: In the hash-based scheme (placeholder for BabyJubJub ECDH),
-    // matching requires ephemeralKey*viewPubkey == viewKey*ephemeralPubkey
-    // which doesn't hold for hash functions. The scan API is tested for shape.
+    // Recipient scans with their viewing key — ECDH commutativity ensures match
     const scanResult = await stealth.stealthScan(
-      recipientViewPubkey,
-      recipientSpendPubkey,
+      viewingKey,
+      spendingPubkey,
       sendResult.ephemeralPubkey,
       sendResult.stealthOwner,
     );
 
-    assert.property(scanResult, "isOurs");
-    assert.isBoolean(scanResult.isOurs);
+    assert.isTrue(scanResult.isOurs, "Recipient should find their own note via ECDH");
+    assert.equal(scanResult.sharedSecret, sendResult.sharedSecret,
+      "Shared secrets should match via ECDH commutativity");
   });
 
   it("stealthScan rejects non-matching stealth addresses", async () => {
-    const recipientSpendPubkey = "ab".repeat(32);
-    const recipientViewPubkey = "cd".repeat(32);
-    const meta = {
-      spendingPubkey: recipientSpendPubkey,
-      viewingPubkey: recipientViewPubkey,
-    };
+    const { secretKey: viewingKey, publicKey: viewingPubkey } =
+      await stealth.generateBjjKeypair();
+    const spendingPubkey = "ab".repeat(32);
 
+    const meta = { spendingPubkey, viewingPubkey };
     const sendResult = await stealth.stealthSend(meta);
 
-    // A different recipient tries to scan
-    const wrongSpendPubkey = "ff".repeat(32);
-    const wrongViewPubkey = "ee".repeat(32);
+    // A different recipient with different keys tries to scan
+    const { secretKey: wrongViewingKey } = await stealth.generateBjjKeypair();
 
     const scanResult = await stealth.stealthScan(
-      wrongViewPubkey,
-      wrongSpendPubkey,
+      wrongViewingKey,
+      spendingPubkey,
       sendResult.ephemeralPubkey,
       sendResult.stealthOwner,
     );
@@ -111,16 +101,17 @@ describe("stealth addresses", () => {
   });
 
   it("different ephemeral keys produce different stealth owners", async () => {
+    const { publicKey: viewingPubkey } = await stealth.generateBjjKeypair();
     const meta = {
       spendingPubkey: "ab".repeat(32),
-      viewingPubkey: "cd".repeat(32),
+      viewingPubkey,
     };
 
     const result1 = await stealth.stealthSend(meta);
     const result2 = await stealth.stealthSend(meta);
 
     // Each call generates a fresh ephemeral key
-    assert.notEqual(
+    assert.notDeepEqual(
       result1.ephemeralPubkey,
       result2.ephemeralPubkey,
       "Ephemeral keys should differ",
