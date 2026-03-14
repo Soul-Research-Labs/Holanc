@@ -10,6 +10,8 @@ export type {
   StealthScanResult,
 } from "./stealth";
 export { HolancBridge, SvmChain } from "./bridge";
+export { FailoverConnection } from "./rpc";
+export type { RpcEndpointConfig, FailoverConfig } from "./rpc";
 export {
   HolancCompliance,
   ComplianceMode,

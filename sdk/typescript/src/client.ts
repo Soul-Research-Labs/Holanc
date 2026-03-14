@@ -17,6 +17,11 @@ import {
   PoolStatus,
   Hash32,
 } from "./types";
+import {
+  FailoverConnection,
+  FailoverConfig,
+  RpcEndpointConfig,
+} from "./rpc";
 
 /** Program IDs — must match deployed Anchor programs. */
 const POOL_PROGRAM_ID = new PublicKey(
@@ -36,30 +41,62 @@ const NULLIFIER_PROGRAM_ID = new PublicKey(
  * Manages proof generation client-side and submits transactions on-chain.
  */
 export class HolancClient {
-  private connection: Connection;
+  private failover: FailoverConnection;
   private wallet: HolancWallet;
   private prover: HolancProver;
   private payer: Keypair;
 
   private constructor(
-    connection: Connection,
+    failover: FailoverConnection,
     payer: Keypair,
     wallet: HolancWallet,
   ) {
-    this.connection = connection;
+    this.failover = failover;
     this.payer = payer;
     this.wallet = wallet;
     this.prover = new HolancProver();
   }
 
+  /**
+   * Create a client with a single RPC endpoint.
+   */
   static async create(
     rpcUrl: string,
     payer: Keypair,
     wallet?: HolancWallet,
   ): Promise<HolancClient> {
-    const connection = new Connection(rpcUrl, "confirmed");
+    const failover = new FailoverConnection([rpcUrl]);
     const w = wallet ?? (await HolancWallet.random());
-    return new HolancClient(connection, payer, w);
+    return new HolancClient(failover, payer, w);
+  }
+
+  /**
+   * Create a client with multi-RPC failover.
+   *
+   * @param endpoints - Array of RPC URLs or endpoint configs (with weight).
+   * @param payer     - Keypair used to sign transactions.
+   * @param config    - Failover options (cooldown, max failures, etc.).
+   * @param wallet    - Optional existing wallet; creates a random one if omitted.
+   */
+  static async createWithFailover(
+    endpoints: (string | RpcEndpointConfig)[],
+    payer: Keypair,
+    config?: FailoverConfig,
+    wallet?: HolancWallet,
+  ): Promise<HolancClient> {
+    const failover = new FailoverConnection(endpoints, config);
+    const w = wallet ?? (await HolancWallet.random());
+    return new HolancClient(failover, payer, w);
+  }
+
+  /** Get the underlying Connection (the currently preferred healthy endpoint). */
+  get connection(): Connection {
+    return this.failover.primary;
+  }
+
+  /** Get RPC health status for monitoring. */
+  rpcStatus() {
+    return this.failover.status();
   }
 
   /** Get the wallet's shielded balance. */
@@ -117,9 +154,9 @@ export class HolancClient {
     });
 
     const tx = new Transaction().add(computeIx, depositIx);
-    const sig = await sendAndConfirmTransaction(this.connection, tx, [
-      this.payer,
-    ]);
+    const sig = await this.failover.exec((c) =>
+      sendAndConfirmTransaction(c, tx, [this.payer]),
+    );
 
     return {
       commitment,
@@ -195,9 +232,9 @@ export class HolancClient {
     });
 
     const tx = new Transaction().add(computeIx, transferIx);
-    const sig = await sendAndConfirmTransaction(this.connection, tx, [
-      this.payer,
-    ]);
+    const sig = await this.failover.exec((c) =>
+      sendAndConfirmTransaction(c, tx, [this.payer]),
+    );
 
     return {
       nullifiers,
@@ -263,9 +300,9 @@ export class HolancClient {
     });
 
     const tx = new Transaction().add(computeIx, withdrawIx);
-    const sig = await sendAndConfirmTransaction(this.connection, tx, [
-      this.payer,
-    ]);
+    const sig = await this.failover.exec((c) =>
+      sendAndConfirmTransaction(c, tx, [this.payer]),
+    );
 
     return {
       nullifiers,
@@ -284,7 +321,9 @@ export class HolancClient {
     );
 
     // Fetch and deserialize pool account data
-    const accountInfo = await this.connection.getAccountInfo(poolPda);
+    const accountInfo = await this.failover.exec((c) =>
+      c.getAccountInfo(poolPda),
+    );
     if (!accountInfo) {
       throw new Error("Pool not found");
     }
