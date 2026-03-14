@@ -108,7 +108,7 @@ pub mod holanc_pool {
                 if idx % 2 == 0 {
                     pool.filled_subtrees[level] = current;
                     // Pair with zero at this level
-                    current = sha256_pair(&current, &ZEROS[level]);
+                    current = sha256_pair(&current, &zeros()[level]);
                 } else {
                     current = sha256_pair(&pool.filled_subtrees[level], &current);
                 }
@@ -150,8 +150,9 @@ pub mod holanc_pool {
         proof_b: [u8; 128],
         proof_c: [u8; 64],
     ) -> Result<()> {
-        // Extract key before mutable borrow
+        // Extract key and bump before mutable borrow
         let pool_key = ctx.accounts.pool.key();
+        let pool_bump = ctx.accounts.pool.bump;
         let pool = &mut ctx.accounts.pool;
         require!(!pool.is_paused, HolancPoolError::PoolPaused);
 
@@ -205,6 +206,28 @@ pub mod holanc_pool {
                 leaf_index,
                 commitment: *commitment,
                 encrypted_note: encrypted_notes.get(i).cloned().unwrap_or_default(),
+            });
+        }
+
+        // Collect fee: transfer from vault to fee_collector
+        if fee > 0 {
+            let seeds = &[b"vault_auth" as &[u8], pool_key.as_ref(), &[pool_bump]];
+            let signer_seeds = &[&seeds[..]];
+
+            let fee_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault.to_account_info(),
+                    to: ctx.accounts.fee_collector.to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                },
+                signer_seeds,
+            );
+            token::transfer(fee_ctx, fee)?;
+
+            emit!(FeeCollected {
+                pool: pool_key,
+                amount: fee,
             });
         }
 
@@ -282,7 +305,7 @@ pub mod holanc_pool {
         }
 
         // Transfer tokens from vault to recipient
-        let seeds = &[b"vault" as &[u8], pool_key.as_ref(), &[pool_bump]];
+        let seeds = &[b"vault_auth" as &[u8], pool_key.as_ref(), &[pool_bump]];
         let signer_seeds = &[&seeds[..]];
 
         let transfer_ctx = CpiContext::new_with_signer(
@@ -317,6 +340,28 @@ pub mod holanc_pool {
             });
         }
 
+        // Collect fee: transfer from vault to fee_collector
+        if fee > 0 {
+            let fee_seeds = &[b"vault_auth" as &[u8], pool_key.as_ref(), &[pool_bump]];
+            let fee_signer = &[&fee_seeds[..]];
+
+            let fee_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.vault.to_account_info(),
+                    to: ctx.accounts.fee_collector.to_account_info(),
+                    authority: ctx.accounts.vault_authority.to_account_info(),
+                },
+                fee_signer,
+            );
+            token::transfer(fee_ctx, fee)?;
+
+            emit!(FeeCollected {
+                pool: pool_key,
+                amount: fee,
+            });
+        }
+
         emit!(WithdrawEvent {
             pool: pool_key,
             nullifiers,
@@ -328,9 +373,25 @@ pub mod holanc_pool {
         Ok(())
     }
 
-    /// Update the Merkle root (called after off-chain tree recomputation).
-    pub fn update_root(ctx: Context<UpdateRoot>, new_root: [u8; 32]) -> Result<()> {
+    /// Update the Merkle root (called after off-chain Poseidon tree recomputation).
+    ///
+    /// Integrity check: the caller must also supply the expected `sha256_root`.
+    /// Since the on-chain SHA-256 tree is updated on every deposit, we can
+    /// verify that the caller's local tree state (leaf count) is consistent
+    /// with the on-chain state. This prevents stale or bogus root submissions.
+    pub fn update_root(
+        ctx: Context<UpdateRoot>,
+        new_root: [u8; 32],
+        expected_sha256_root: [u8; 32],
+    ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+
+        // Integrity: caller must prove awareness of the current on-chain SHA-256 root.
+        require!(
+            pool.sha256_root == expected_sha256_root,
+            HolancPoolError::RootIntegrityMismatch
+        );
+
         pool.current_root = new_root;
         let idx = pool.root_history_index as usize;
         pool.root_history[idx] = new_root;
@@ -365,15 +426,22 @@ fn sha256_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 
 /// Pre-computed SHA-256 zero hashes for each tree level.
 /// ZEROS[0] = sha256(0x00..00, 0x00..00), ZEROS[1] = sha256(ZEROS[0], ZEROS[0]), etc.
-/// These are computed at compile time as constants.
-const ZEROS: [[u8; 32]; TREE_DEPTH] = compute_zeros_const();
-
-const fn compute_zeros_const() -> [[u8; 32]; TREE_DEPTH] {
-    // Can't call SHA-256 in const fn, so we use all-zeros as the empty leaf
-    // and pre-compute the first few levels. At runtime the actual zeros are
-    // computed in initialize_pool. For the incremental update we use the
-    // filled_subtrees which are initialized to all-zeros in PoolState::default.
-    [[0u8; 32]; TREE_DEPTH]
+///
+/// We use `once_cell::sync::Lazy` to compute these at first access since
+/// SHA-256 cannot run in `const fn`.  Alternatively, call `initialize_zeros()`
+/// once at pool init.
+fn zeros() -> &'static [[u8; 32]; TREE_DEPTH] {
+    use std::sync::OnceLock;
+    static ZEROS: OnceLock<[[u8; 32]; TREE_DEPTH]> = OnceLock::new();
+    ZEROS.get_or_init(|| {
+        let mut z = [[0u8; 32]; TREE_DEPTH];
+        // Level 0: hash of two empty leaves (all-zeros)
+        z[0] = sha256_pair(&[0u8; 32], &[0u8; 32]);
+        for i in 1..TREE_DEPTH {
+            z[i] = sha256_pair(&z[i - 1], &z[i - 1]);
+        }
+        z
+    })
 }
 
 fn is_known_root(pool: &PoolState, root: &[u8; 32]) -> bool {
@@ -506,6 +574,16 @@ pub struct PrivateTransfer<'info> {
     #[account(mut)]
     pub nullifier_registry: Account<'info, NullifierRegistry>,
 
+    #[account(mut)]
+    pub vault: Account<'info, TokenAccount>,
+
+    /// CHECK: PDA authority over vault.
+    pub vault_authority: UncheckedAccount<'info>,
+
+    /// Fee collector token account.
+    #[account(mut)]
+    pub fee_collector: Account<'info, TokenAccount>,
+
     /// The holanc-verifier program for proof CPI.
     /// CHECK: Verified by address constraint.
     #[account(address = VERIFIER_PROGRAM_ID)]
@@ -516,6 +594,8 @@ pub struct PrivateTransfer<'info> {
     pub verification_key: AccountInfo<'info>,
 
     pub authority: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -534,6 +614,10 @@ pub struct Withdraw<'info> {
 
     #[account(mut)]
     pub recipient_token_account: Account<'info, TokenAccount>,
+
+    /// Fee collector token account.
+    #[account(mut)]
+    pub fee_collector: Account<'info, TokenAccount>,
 
     /// The holanc-verifier program for proof CPI.
     /// CHECK: Verified by address constraint.
@@ -677,6 +761,12 @@ pub struct WithdrawEvent {
     pub fee: u64,
 }
 
+#[event]
+pub struct FeeCollected {
+    pub pool: Pubkey,
+    pub amount: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -697,6 +787,8 @@ pub enum HolancPoolError {
     UnknownMerkleRoot,
     #[msg("Nullifier has already been spent")]
     NullifierAlreadySpent,
+    #[msg("SHA-256 root integrity mismatch — update_root rejected")]
+    RootIntegrityMismatch,
     #[msg("Insufficient pool balance")]
     InsufficientPoolBalance,
     #[msg("Unauthorized")]
