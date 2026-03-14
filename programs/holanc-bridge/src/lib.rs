@@ -1,7 +1,16 @@
 use anchor_lang::prelude::*;
 use sha2::{Sha256, Digest};
+use anchor_lang::solana_program::sysvar::instructions as ix_sysvar;
 
 declare_id!("H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K");
+
+/// Ed25519 native program ID (precompile for signature verification).
+const ED25519_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+    0x03, 0x71, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]);
 
 /// Supported SVM chains for cross-chain privacy.
 pub const CHAIN_SOLANA: u64 = 1;
@@ -14,11 +23,11 @@ pub const MAX_FOREIGN_ROOTS: usize = 32;
 /// Wormhole guardian signature threshold (13 of 19).
 pub const GUARDIAN_THRESHOLD: u8 = 13;
 
-/// A guardian's signature over a VAA body hash.
+/// A guardian's ed25519 signature over a VAA body hash.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct GuardianSignature {
     pub guardian_index: u8,
-    pub signature: [u8; 32],
+    pub signature: [u8; 64],
 }
 
 #[program]
@@ -128,25 +137,38 @@ pub mod holanc_bridge {
             HolancBridgeError::InsufficientGuardianSignatures
         );
 
-        // Verify each signature: guardian index must be valid and unique
+        // Verify each signature: guardian index must be valid and unique,
+        // and the ed25519 signature must be valid over the VAA body hash.
+        //
+        // We require a preceding Ed25519Program.createInstructionWithPublicKey
+        // instruction for each guardian signature in the transaction.
+        // The Ed25519 native program verifies the signature, and we
+        // introspect the instructions sysvar to confirm it was included.
         let mut seen_indices = [false; 19];
         let mut valid_count: u8 = 0;
-        for sig in &guardian_signatures {
+        let ix_sysvar_info = &ctx.accounts.instruction_sysvar;
+
+        for (sig_idx, sig) in guardian_signatures.iter().enumerate() {
             let idx = sig.guardian_index as usize;
             require!(idx < guardian_set.num_guardians as usize, HolancBridgeError::InvalidGuardianIndex);
             require!(!seen_indices[idx], HolancBridgeError::DuplicateGuardianSignature);
             seen_indices[idx] = true;
 
-            // Verify the signature: SHA256(guardian_key || vaa_hash) == sig.signature
-            // This is a simplified verification — production would use ed25519 or secp256k1
-            let mut sig_hasher = Sha256::new();
-            sig_hasher.update(guardian_set.guardian_keys[idx]);
-            sig_hasher.update(vaa_hash);
-            let expected: [u8; 32] = sig_hasher.finalize().into();
-            require!(
-                expected == sig.signature,
-                HolancBridgeError::InvalidGuardianSignature
-            );
+            // Verify that an ed25519 signature verification instruction
+            // exists in this transaction for this guardian's signature.
+            // The ed25519 precompile instruction format:
+            //   - program_id == Ed25519Program
+            //   - data contains: num_signatures(u8), padding(u8),
+            //     then per signature: sig_offset, sig_ix_idx, pubkey_offset,
+            //     pubkey_ix_idx, msg_offset, msg_size, msg_ix_idx
+            verify_ed25519_ix(
+                ix_sysvar_info,
+                sig_idx,
+                &guardian_set.guardian_keys[idx],
+                &sig.signature,
+                &vaa_hash,
+            )?;
+
             valid_count += 1;
         }
 
@@ -312,10 +334,7 @@ pub mod holanc_bridge {
     /// Pause/unpause the bridge (admin only).
     pub fn set_active(ctx: Context<AdminBridge>, active: bool) -> Result<()> {
         let bridge = &mut ctx.accounts.bridge_config;
-        require!(
-            bridge.authority == ctx.accounts.authority.key(),
-            HolancBridgeError::Unauthorized
-        );
+        // has_one = authority constraint on AdminBridge already validates caller
         bridge.is_active = active;
         Ok(())
     }
@@ -357,6 +376,75 @@ fn hash_proof(proof: &[u8]) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(&result);
     out
+}
+
+/// Verify that a preceding Ed25519 signature verification instruction exists
+/// in this transaction for the given guardian signature.
+///
+/// The sdk/relayer must prepend Ed25519Program.createInstructionWithPublicKey
+/// instructions before calling receive_epoch_root. This function introspects
+/// the transaction's instructions sysvar to confirm that the native ed25519
+/// program verified the signature.
+fn verify_ed25519_ix(
+    ix_sysvar: &AccountInfo,
+    sig_idx: usize,
+    guardian_pubkey: &[u8; 32],
+    signature: &[u8; 64],
+    message: &[u8; 32],
+) -> Result<()> {
+    use anchor_lang::solana_program::sysvar::instructions::load_instruction_at_checked;
+
+    // The ed25519 verification instructions should precede this instruction.
+    // Each guardian signature gets one ed25519 precompile instruction.
+    let ix = load_instruction_at_checked(sig_idx, ix_sysvar)
+        .map_err(|_| error!(HolancBridgeError::InvalidEd25519Instruction))?;
+
+    // Verify it's an Ed25519 program instruction
+    require!(
+        ix.program_id == ED25519_PROGRAM_ID,
+        HolancBridgeError::InvalidEd25519Instruction
+    );
+
+    // Ed25519 instruction data format:
+    // [0]: num_signatures (u8)
+    // [1]: padding (u8)
+    // Then per signature (16 bytes each):
+    //   [2..4]:   signature_offset (u16 LE)
+    //   [4..6]:   signature_instruction_index (u16 LE) — 0xFFFF = this ix
+    //   [6..8]:   public_key_offset (u16 LE)
+    //   [8..10]:  public_key_instruction_index (u16 LE)
+    //   [10..12]: message_data_offset (u16 LE)
+    //   [12..14]: message_data_size (u16 LE)
+    //   [14..16]: message_instruction_index (u16 LE)
+    // Followed by the actual signature (64 bytes), pubkey (32 bytes), message bytes.
+    require!(ix.data.len() >= 2, HolancBridgeError::InvalidEd25519Instruction);
+    let num_sigs = ix.data[0] as usize;
+    require!(num_sigs >= 1, HolancBridgeError::InvalidEd25519Instruction);
+
+    // Extract the signature, pubkey, and message from the instruction data
+    let sig_offset = u16::from_le_bytes([ix.data[2], ix.data[3]]) as usize;
+    let pk_offset = u16::from_le_bytes([ix.data[6], ix.data[7]]) as usize;
+    let msg_offset = u16::from_le_bytes([ix.data[10], ix.data[11]]) as usize;
+    let msg_size = u16::from_le_bytes([ix.data[12], ix.data[13]]) as usize;
+
+    // Validate the embedded data matches what we expect
+    require!(
+        ix.data.len() >= sig_offset + 64
+            && ix.data.len() >= pk_offset + 32
+            && ix.data.len() >= msg_offset + msg_size,
+        HolancBridgeError::InvalidEd25519Instruction
+    );
+    require!(msg_size == 32, HolancBridgeError::InvalidEd25519Instruction);
+
+    let ix_sig = &ix.data[sig_offset..sig_offset + 64];
+    let ix_pk = &ix.data[pk_offset..pk_offset + 32];
+    let ix_msg = &ix.data[msg_offset..msg_offset + 32];
+
+    require!(ix_sig == signature, HolancBridgeError::InvalidGuardianSignature);
+    require!(ix_pk == guardian_pubkey, HolancBridgeError::InvalidGuardianSignature);
+    require!(ix_msg == message, HolancBridgeError::InvalidGuardianSignature);
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -428,7 +516,16 @@ pub struct ReceiveEpochRoot<'info> {
     pub foreign_root: Account<'info, ForeignRoot>,
 
     /// Guardian set for VAA signature verification.
+    /// Must belong to the same pool as the bridge config.
+    #[account(
+        constraint = guardian_set.pool == bridge_config.pool @ HolancBridgeError::GuardianSetPoolMismatch
+    )]
     pub guardian_set: Account<'info, GuardianSet>,
+
+    /// Instructions sysvar for ed25519 signature introspection.
+    /// CHECK: Validated by address constraint against the instructions sysvar.
+    #[account(address = ix_sysvar::ID)]
+    pub instruction_sysvar: AccountInfo<'info>,
 
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -492,7 +589,7 @@ pub struct UnlockCommitment<'info> {
 
 #[derive(Accounts)]
 pub struct AdminBridge<'info> {
-    #[account(mut)]
+    #[account(mut, has_one = authority)]
     pub bridge_config: Account<'info, BridgeConfig>,
 
     pub authority: Signer<'info>,
@@ -688,4 +785,8 @@ pub enum HolancBridgeError {
     InvalidGuardianSignature,
     #[msg("Invalid guardian count")]
     InvalidGuardianCount,
+    #[msg("Guardian set does not belong to this pool")]
+    GuardianSetPoolMismatch,
+    #[msg("Invalid or missing ed25519 signature verification instruction")]
+    InvalidEd25519Instruction,
 }
