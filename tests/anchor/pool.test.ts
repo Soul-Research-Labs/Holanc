@@ -39,7 +39,9 @@ describe("holanc-pool instructions", () => {
   let depositorAta: PublicKey;
 
   // Nullifier program CPI accounts
-  const NULLIFIER_PROGRAM_ID = new PublicKey("BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si");
+  const NULLIFIER_PROGRAM_ID = new PublicKey(
+    "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+  );
   let nullifierManagerPda: PublicKey;
   let nullifierPagePda: PublicKey;
 

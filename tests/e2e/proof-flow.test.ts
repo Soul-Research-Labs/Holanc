@@ -197,12 +197,14 @@ describe("ZK proof flow E2E", () => {
 
       // Verify value conservation
       const totalIn = inputNotes.reduce((sum, n) => sum + n.value, 0n);
-      const totalOut =
-        outputNotes.reduce((sum, n) => sum + n.value, 0n) + fee;
+      const totalOut = outputNotes.reduce((sum, n) => sum + n.value, 0n) + fee;
       assert.equal(totalIn, totalOut, "Value must be conserved");
 
       // Build Merkle tree with both input commitments
-      const { root, proofs } = await buildMerkleTree(inputCommitments, TREE_DEPTH);
+      const { root, proofs } = await buildMerkleTree(
+        inputCommitments,
+        TREE_DEPTH,
+      );
 
       // All signals are now available for circuit witness generation
       assert.isTrue(root > 0n);
@@ -258,7 +260,10 @@ describe("ZK proof flow E2E", () => {
         ),
       );
 
-      const { root, proofs } = await buildMerkleTree(inputCommitments, TREE_DEPTH);
+      const { root, proofs } = await buildMerkleTree(
+        inputCommitments,
+        TREE_DEPTH,
+      );
 
       const circuitInput = {
         merkle_root: root.toString(),
@@ -287,7 +292,10 @@ describe("ZK proof flow E2E", () => {
       const witness = { type: "mem" } as any;
       await wtns.calculate(circuitInput, wasmPath, witness);
 
-      assert.isNotNull(witness, "Witness generation should succeed for valid transfer");
+      assert.isNotNull(
+        witness,
+        "Witness generation should succeed for valid transfer",
+      );
     });
   });
 

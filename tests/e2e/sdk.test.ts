@@ -35,10 +35,18 @@ describe("stealth addresses", () => {
     const result = await stealth.stealthSend(meta);
 
     assert.isArray(result.ephemeralPubkey);
-    assert.lengthOf(result.ephemeralPubkey, 2, "Ephemeral pubkey should be [x, y]");
+    assert.lengthOf(
+      result.ephemeralPubkey,
+      2,
+      "Ephemeral pubkey should be [x, y]",
+    );
     assert.isString(result.stealthOwner);
     assert.isString(result.sharedSecret);
-    assert.lengthOf(result.stealthOwner, 64, "stealthOwner should be 32 bytes hex");
+    assert.lengthOf(
+      result.stealthOwner,
+      64,
+      "stealthOwner should be 32 bytes hex",
+    );
   });
 
   it("stealthScan correctly identifies own notes via ECDH", async () => {
@@ -57,9 +65,15 @@ describe("stealth addresses", () => {
       sendResult.stealthOwner,
     );
 
-    assert.isTrue(scanResult.isOurs, "Recipient should find their own note via ECDH");
-    assert.equal(scanResult.sharedSecret, sendResult.sharedSecret,
-      "Shared secrets should match via ECDH commutativity");
+    assert.isTrue(
+      scanResult.isOurs,
+      "Recipient should find their own note via ECDH",
+    );
+    assert.equal(
+      scanResult.sharedSecret,
+      sendResult.sharedSecret,
+      "Shared secrets should match via ECDH commutativity",
+    );
   });
 
   it("stealthScan rejects non-matching stealth addresses", async () => {

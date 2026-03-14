@@ -63,15 +63,21 @@ export class ReplicatedNoteStore {
   // -----------------------------------------------------------------------
 
   getNotesByRange(fromLeaf: number, toLeaf: number): IndexedNote[] {
-    return this.readFromReplica((store) => store.getNotesByRange(fromLeaf, toLeaf));
+    return this.readFromReplica((store) =>
+      store.getNotesByRange(fromLeaf, toLeaf),
+    );
   }
 
   getNotesAfter(fromLeaf: number, limit = 1000): IndexedNote[] {
-    return this.readFromReplica((store) => store.getNotesAfter(fromLeaf, limit));
+    return this.readFromReplica((store) =>
+      store.getNotesAfter(fromLeaf, limit),
+    );
   }
 
   getNoteByCommitment(commitment: string): IndexedNote | undefined {
-    return this.readFromReplica((store) => store.getNoteByCommitment(commitment));
+    return this.readFromReplica((store) =>
+      store.getNoteByCommitment(commitment),
+    );
   }
 
   count(): number {

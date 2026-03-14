@@ -292,9 +292,7 @@ describe("circuit constraint satisfaction tests", () => {
       const assetId = 1n;
 
       const inCommitments = await Promise.all(
-        [0, 1].map((i) =>
-          poseidon([ownerPub, 500n, assetId, BigInt(100 + i)]),
-        ),
+        [0, 1].map((i) => poseidon([ownerPub, 500n, assetId, BigInt(100 + i)])),
       );
       const nullifiers = await Promise.all(
         inCommitments.map((cm) => poseidon([spendingKey, cm])),
@@ -412,7 +410,11 @@ describe("circuit constraint satisfaction tests", () => {
       const cm = await poseidon([1n, 100n, 1n, 99n]);
       const nf1 = await poseidon([42n, cm]);
       const nf2 = await poseidon([42n, cm]);
-      assert.equal(nf1, nf2, "Same key+commitment should produce same nullifier");
+      assert.equal(
+        nf1,
+        nf2,
+        "Same key+commitment should produce same nullifier",
+      );
     });
 
     it("NullifierV1: different keys produce different nullifiers", async () => {
