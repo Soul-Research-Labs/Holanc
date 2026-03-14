@@ -12,7 +12,7 @@ app.use(express.json({ limit: "64kb" }));
 // ---------------------------------------------------------------------------
 // Per-IP rate limiter (sliding window, configurable)
 // ---------------------------------------------------------------------------
-const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10);
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || "60", 10);
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
 
