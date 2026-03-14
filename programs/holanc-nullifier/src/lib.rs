@@ -4,8 +4,12 @@ use sha2::{Sha256, Digest};
 declare_id!("BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si");
 
 /// Number of nullifier slots per registry page (bitmap-based).
-/// Each page covers 256 nullifier slots using a 32-byte bitmap.
-pub const SLOTS_PER_PAGE: usize = 256;
+/// Each page covers 2048 nullifier slots using a 256-byte bitmap.
+/// With SHA-256 hashing, this gives a ~1/2048 false-positive collision
+/// rate per page, a significant improvement over the prior 1/256 rate.
+pub const SLOTS_PER_PAGE: usize = 2048;
+/// Bitmap size in bytes (SLOTS_PER_PAGE / 8).
+pub const BITMAP_BYTES: usize = SLOTS_PER_PAGE / 8; // 256
 /// Maximum number of epochs before forced rotation.
 pub const MAX_EPOCHS: usize = 1024;
 
@@ -254,18 +258,18 @@ impl NullifierManager {
     pub const MAX_SIZE: usize = 32 + 32 + 8 + 8 + 8 + 8 + 1;
 }
 
-/// A page of nullifier bitmap. Each page can track SLOTS_PER_PAGE (256) nullifiers.
+/// A page of nullifier bitmap. Each page can track SLOTS_PER_PAGE (2048) nullifiers.
 /// Multiple pages are created as needed, keyed by page index.
 #[account]
 pub struct NullifierPage {
     pub pool: Pubkey,
     pub page_index: u64,
     pub count: u32,
-    pub bitmap: [u8; 32], // 256 bits = 32 bytes
+    pub bitmap: [u8; BITMAP_BYTES], // 2048 bits = 256 bytes
 }
 
 impl NullifierPage {
-    pub const MAX_SIZE: usize = 32 + 8 + 4 + 32;
+    pub const MAX_SIZE: usize = 32 + 8 + 4 + BITMAP_BYTES;
 }
 
 /// Record of a finalized epoch, used for cross-chain nullifier root synchronization.
