@@ -132,13 +132,13 @@ Foreign epoch nullifier roots arrive via Wormhole VAA and are verified using SHA
 
 ### Summary Table
 
-| Context | Hash | Rationale |
-|---------|------|-----------|
-| On-chain Merkle (deposit) | SHA-256 | Low CU cost; integrity anchor |
-| ZK circuits (proofs) | Poseidon | ZK-friendly (~300 R1CS constraints) |
-| Root history (pool state) | Poseidon | Verified by ZK proofs |
-| `update_root()` integrity check | SHA-256 | Ensures Poseidon root matches on-chain commits |
-| Cross-chain nullifier proofs | SHA-256 | Wormhole ecosystem compatibility |
+| Context                         | Hash     | Rationale                                      |
+| ------------------------------- | -------- | ---------------------------------------------- |
+| On-chain Merkle (deposit)       | SHA-256  | Low CU cost; integrity anchor                  |
+| ZK circuits (proofs)            | Poseidon | ZK-friendly (~300 R1CS constraints)            |
+| Root history (pool state)       | Poseidon | Verified by ZK proofs                          |
+| `update_root()` integrity check | SHA-256  | Ensures Poseidon root matches on-chain commits |
+| Cross-chain nullifier proofs    | SHA-256  | Wormhole ecosystem compatibility               |
 
 > **Invariant**: Every `update_root(poseidon_root, expected_sha256_root)` call verifies that `expected_sha256_root` matches the on-chain incrementally-computed SHA-256 root. This binds the two trees: any disagreement about which leaves exist causes `update_root` to fail.
 

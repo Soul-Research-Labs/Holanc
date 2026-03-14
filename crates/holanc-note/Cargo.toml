@@ -8,6 +8,7 @@ description = "Note model, key management, ECDH encryption, and stealth addresse
 [dependencies]
 holanc-primitives = { path = "../holanc-primitives" }
 ark-bn254 = { workspace = true }
+ark-ed-on-bn254 = { workspace = true }
 ark-ff = { workspace = true }
 ark-ec = { workspace = true }
 ark-std = { workspace = true }

@@ -65,8 +65,9 @@ function generateFullPageCoverage(): Buffer[] {
     }
   }
   // Return sorted by slot for deterministic ordering
-  return Array.from({ length: SLOTS_PER_PAGE }, (_, s) =>
-    slotToNullifier.get(s)!,
+  return Array.from(
+    { length: SLOTS_PER_PAGE },
+    (_, s) => slotToNullifier.get(s)!,
   );
 }
 
@@ -170,16 +171,20 @@ describe("nullifier bitmap collision boundary tests", () => {
         .rpc();
 
       // Verify page has exactly 1 nullifier
-      const pageAfterFirst =
-        await nullifierProgram.account.nullifierPage.fetch(pagePda);
+      const pageAfterFirst = await nullifierProgram.account.nullifierPage.fetch(
+        pagePda,
+      );
       assert.equal(pageAfterFirst.count, 1);
 
       // Verify the bit is set
       const byteIdx = Math.floor(collisionSlot / 8);
       const bitOff = collisionSlot % 8;
-      const bitSet =
-        (pageAfterFirst.bitmap[byteIdx] >> bitOff) & 1;
-      assert.equal(bitSet, 1, "Bitmap bit should be set after first registration");
+      const bitSet = (pageAfterFirst.bitmap[byteIdx] >> bitOff) & 1;
+      assert.equal(
+        bitSet,
+        1,
+        "Bitmap bit should be set after first registration",
+      );
 
       // Register second nullifier (different data, SAME bit index) — should fail
       try {
@@ -252,8 +257,9 @@ describe("nullifier bitmap collision boundary tests", () => {
       }
 
       // Verify page is fully saturated
-      const fullPage =
-        await nullifierProgram.account.nullifierPage.fetch(freshPagePda);
+      const fullPage = await nullifierProgram.account.nullifierPage.fetch(
+        freshPagePda,
+      );
       assert.equal(fullPage.count, 256, "Page must have 256 entries");
 
       // Every byte of the bitmap should be 0xFF
@@ -277,9 +283,7 @@ describe("nullifier bitmap collision boundary tests", () => {
             authority: payer.publicKey,
           })
           .rpc();
-        assert.fail(
-          "Should have thrown — page is fully saturated",
-        );
+        assert.fail("Should have thrown — page is fully saturated");
       } catch (err: any) {
         assert.include(err.toString(), "NullifierAlreadySpent");
       }
@@ -315,8 +319,7 @@ describe("nullifier bitmap collision boundary tests", () => {
       // If they DO collide for these specific values, the domain separation
       // still works in general.
       const slotV1 = bitmapBitIndex(nul); // v1 ignores chain/app
-      const slotsAreDistinct =
-        slotChain1 !== slotV1 || slotChain2 !== slotV1;
+      const slotsAreDistinct = slotChain1 !== slotV1 || slotChain2 !== slotV1;
       assert.isTrue(
         slotsAreDistinct,
         "V2 domain-separated slots should generally differ from V1 slot",

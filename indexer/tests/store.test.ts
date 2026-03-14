@@ -4,7 +4,10 @@ import * as os from "os";
 import * as path from "path";
 
 function tmpDb(): string {
-  return path.join(os.tmpdir(), `holanc-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return path.join(
+    os.tmpdir(),
+    `holanc-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+  );
 }
 
 function makeNote(overrides: Partial<IndexedNote> = {}): IndexedNote {
@@ -30,9 +33,21 @@ describe("NoteStore", () => {
 
   afterEach(() => {
     store.close();
-    try { fs.unlinkSync(dbPath); } catch { /* ignore */ }
-    try { fs.unlinkSync(dbPath + "-wal"); } catch { /* ignore */ }
-    try { fs.unlinkSync(dbPath + "-shm"); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(dbPath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(dbPath + "-wal");
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(dbPath + "-shm");
+    } catch {
+      /* ignore */
+    }
   });
 
   // -- insertNote / count ---------------------------------------------------

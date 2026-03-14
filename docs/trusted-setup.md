@@ -11,10 +11,10 @@ participant destroys their secret contribution**.
 
 The ceremony has two phases:
 
-| Phase | Scope | Shared across circuits? |
-|-------|-------|------------------------|
-| **Phase 1 — Powers of Tau** | Generates universal SRS parameters | Yes |
-| **Phase 2 — Circuit-specific** | Specialises the SRS for each circuit | No (one per circuit) |
+| Phase                          | Scope                                | Shared across circuits? |
+| ------------------------------ | ------------------------------------ | ----------------------- |
+| **Phase 1 — Powers of Tau**    | Generates universal SRS parameters   | Yes                     |
+| **Phase 2 — Circuit-specific** | Specialises the SRS for each circuit | No (one per circuit)    |
 
 Holanc has **11 circuits** (see `circuits/` directory). Phase 1 is performed
 once; Phase 2 must be repeated per circuit.
@@ -35,6 +35,7 @@ The development setup (see `scripts/setup-circuits.sh`) downloads a
 pre-computed Hermez Phase 1 file. For production you should either:
 
 1. **Use a well-known community ceremony** (recommended):
+
    - [Ethereum KZG Ceremony](https://ceremony.ethereum.org/) outputs
    - [Hermez Phase 1](https://blog.hermez.io/hermez-cryptographic-setup/) files
    - Iden3/SnarkJS Perpetual Powers of Tau
@@ -185,11 +186,11 @@ Verification checks:
 
 After the ceremony, the following artifacts go into production:
 
-| Artifact | Location | Used by |
-|----------|----------|---------|
-| `*_final.zkey` | Client-side prover | `holanc-prover` crate, SDK |
-| `*_vkey.json` | On-chain verifier | `holanc-verifier` program |
-| `*.wasm` | Client-side witness gen | `holanc-prover` crate, SDK |
+| Artifact       | Location                | Used by                    |
+| -------------- | ----------------------- | -------------------------- |
+| `*_final.zkey` | Client-side prover      | `holanc-prover` crate, SDK |
+| `*_vkey.json`  | On-chain verifier       | `holanc-verifier` program  |
+| `*.wasm`       | Client-side witness gen | `holanc-prover` crate, SDK |
 
 The verification keys must be embedded in or loaded by the on-chain verifier
 program. The `.zkey` files are distributed to client provers (CLI, SDK, frontend).
@@ -251,10 +252,10 @@ Publish a JSON transcript for each circuit:
 
 ## Development vs Production
 
-| Aspect | Development (`setup-circuits.sh`) | Production (this guide) |
-|--------|----------------------------------|------------------------|
-| Phase 1 | Pre-computed Hermez download | MPC or community ceremony |
-| Phase 2 contributions | 1 (dev random) | ≥ 5 independent |
-| Random beacon | None | Required |
-| Transcript | Not published | Publicly verified |
-| Trust assumption | Fully trusted dev | 1-of-N honest participant |
+| Aspect                | Development (`setup-circuits.sh`) | Production (this guide)   |
+| --------------------- | --------------------------------- | ------------------------- |
+| Phase 1               | Pre-computed Hermez download      | MPC or community ceremony |
+| Phase 2 contributions | 1 (dev random)                    | ≥ 5 independent           |
+| Random beacon         | None                              | Required                  |
+| Transcript            | Not published                     | Publicly verified         |
+| Trust assumption      | Fully trusted dev                 | 1-of-N honest participant |

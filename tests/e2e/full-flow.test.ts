@@ -31,9 +31,13 @@ import {
 import { assert } from "chai";
 
 const POOL_ID = new PublicKey("6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT");
-const NULLIFIER_ID = new PublicKey("BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si");
+const NULLIFIER_ID = new PublicKey(
+  "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+);
 const BRIDGE_ID = new PublicKey("H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K");
-const COMPLIANCE_ID = new PublicKey("8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE");
+const COMPLIANCE_ID = new PublicKey(
+  "8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE",
+);
 
 describe("holanc full-flow E2E", () => {
   const provider = anchor.AnchorProvider.env();
@@ -57,22 +61,31 @@ describe("holanc full-flow E2E", () => {
 
   before(async () => {
     // Load all program IDLs
-    const [poolIdl, nullifierIdl, bridgeIdl, complianceIdl] = await Promise.all([
-      Program.fetchIdl(POOL_ID, provider).catch(() => null),
-      Program.fetchIdl(NULLIFIER_ID, provider).catch(() => null),
-      Program.fetchIdl(BRIDGE_ID, provider).catch(() => null),
-      Program.fetchIdl(COMPLIANCE_ID, provider).catch(() => null),
-    ]);
+    const [poolIdl, nullifierIdl, bridgeIdl, complianceIdl] = await Promise.all(
+      [
+        Program.fetchIdl(POOL_ID, provider).catch(() => null),
+        Program.fetchIdl(NULLIFIER_ID, provider).catch(() => null),
+        Program.fetchIdl(BRIDGE_ID, provider).catch(() => null),
+        Program.fetchIdl(COMPLIANCE_ID, provider).catch(() => null),
+      ],
+    );
 
     if (poolIdl) poolProgram = new Program(poolIdl, provider);
     if (nullifierIdl) nullifierProgram = new Program(nullifierIdl, provider);
     if (bridgeIdl) bridgeProgram = new Program(bridgeIdl, provider);
     if (complianceIdl) complianceProgram = new Program(complianceIdl, provider);
 
-    allProgramsReady = !!(poolProgram && nullifierProgram && bridgeProgram && complianceProgram);
+    allProgramsReady = !!(
+      poolProgram &&
+      nullifierProgram &&
+      bridgeProgram &&
+      complianceProgram
+    );
 
     if (!allProgramsReady) {
-      console.log("⚠ Some program IDLs unavailable — partial tests may be skipped");
+      console.log(
+        "⚠ Some program IDLs unavailable — partial tests may be skipped",
+      );
     }
 
     // Create token mint + depositor ATA
@@ -183,7 +196,10 @@ describe("holanc full-flow E2E", () => {
       // Verify SHA-256 root was updated (non-zero)
       const rootBytes = Buffer.from(poolState.sha256Root);
       const isNonZero = rootBytes.some((b: number) => b !== 0);
-      assert.isTrue(isNonZero, "SHA-256 root should be non-zero after deposits");
+      assert.isTrue(
+        isNonZero,
+        "SHA-256 root should be non-zero after deposits",
+      );
     });
 
     it("vault holds exactly 5 tokens", async () => {
@@ -254,17 +270,16 @@ describe("holanc full-flow E2E", () => {
         })
         .rpc();
 
-      const mgr = await nullifierProgram.account.nullifierManager.fetch(managerPda);
+      const mgr = await nullifierProgram.account.nullifierManager.fetch(
+        managerPda,
+      );
       assert.equal(mgr.pool.toBase58(), poolPda.toBase58());
     });
 
     it("registers nullifiers for spent notes", async () => {
       if (!nullifierProgram) return;
 
-      const nullifiers = [
-        Buffer.alloc(32, 0x11),
-        Buffer.alloc(32, 0x22),
-      ];
+      const nullifiers = [Buffer.alloc(32, 0x11), Buffer.alloc(32, 0x22)];
 
       for (const nf of nullifiers) {
         await nullifierProgram.methods
@@ -277,7 +292,9 @@ describe("holanc full-flow E2E", () => {
           .rpc();
       }
 
-      const mgr = await nullifierProgram.account.nullifierManager.fetch(managerPda);
+      const mgr = await nullifierProgram.account.nullifierManager.fetch(
+        managerPda,
+      );
       assert.equal(mgr.totalNullifiers.toNumber(), 2);
     });
 
@@ -385,7 +402,9 @@ describe("holanc full-flow E2E", () => {
         })
         .rpc();
 
-      const msg = await bridgeProgram.account.outboundMessage.fetch(outboundPda);
+      const msg = await bridgeProgram.account.outboundMessage.fetch(
+        outboundPda,
+      );
       assert.equal(msg.nullifierCount.toNumber(), 2);
     });
 
@@ -406,13 +425,9 @@ describe("holanc full-flow E2E", () => {
       const vaaHash = Buffer.alloc(32, 0xdd);
 
       await bridgeProgram.methods
-        .receiveEpochRoot(
-          new BN(2),
-          new BN(0),
-          [...foreignRoot],
-          new BN(5),
-          [...vaaHash],
-        )
+        .receiveEpochRoot(new BN(2), new BN(0), [...foreignRoot], new BN(5), [
+          ...vaaHash,
+        ])
         .accounts({
           bridgeConfig: bridgePda,
           foreignRoot: foreignRootPda,
@@ -421,7 +436,9 @@ describe("holanc full-flow E2E", () => {
         })
         .rpc();
 
-      const root = await bridgeProgram.account.foreignRoot.fetch(foreignRootPda);
+      const root = await bridgeProgram.account.foreignRoot.fetch(
+        foreignRootPda,
+      );
       assert.equal(root.sourceChain.toNumber(), 2);
     });
   });
@@ -506,10 +523,9 @@ describe("holanc full-flow E2E", () => {
       );
 
       await complianceProgram.methods
-        .discloseViewingKey(
-          Buffer.from("aes256_encrypted_vk_payload"),
-          { full: {} },
-        )
+        .discloseViewingKey(Buffer.from("aes256_encrypted_vk_payload"), {
+          full: {},
+        })
         .accounts({
           complianceConfig: compliancePda,
           oracleRecord: oraclePda,
@@ -529,11 +545,7 @@ describe("holanc full-flow E2E", () => {
       if (!complianceProgram) return;
 
       const [wealthPda] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("wealth"),
-          poolPda.toBuffer(),
-          payer.publicKey.toBuffer(),
-        ],
+        [Buffer.from("wealth"), poolPda.toBuffer(), payer.publicKey.toBuffer()],
         COMPLIANCE_ID,
       );
 
@@ -551,9 +563,8 @@ describe("holanc full-flow E2E", () => {
         })
         .rpc();
 
-      const attestation = await complianceProgram.account.wealthAttestation.fetch(
-        wealthPda,
-      );
+      const attestation =
+        await complianceProgram.account.wealthAttestation.fetch(wealthPda);
       assert.isTrue(attestation.isValid);
       assert.equal(attestation.threshold.toNumber(), 10_000_000_000);
     });

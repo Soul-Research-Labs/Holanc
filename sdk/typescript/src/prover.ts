@@ -15,6 +15,10 @@ interface TransferProveParams {
   inputNotes: Note[];
   outputNotes: Note[];
   fee: bigint;
+  /** Merkle path siblings for each input note (each is an array of TREE_DEPTH field elements). */
+  merklePathElements?: string[][];
+  /** Merkle path direction indices for each input (0 = left, 1 = right). */
+  merklePathIndices?: string[][];
 }
 
 interface TransferV2ProveParams extends TransferProveParams {
@@ -55,6 +59,10 @@ interface WealthProofProveParams {
   spendingKey: Hash32;
   inputNotes: Note[];
   threshold: bigint;
+  /** Merkle path siblings for each input note. */
+  merklePathElements?: string[][];
+  /** Merkle path direction indices for each input. */
+  merklePathIndices?: string[][];
 }
 
 interface ProveResult {
@@ -155,6 +163,7 @@ export class HolancProver {
   async proveWealth(params: WealthProofProveParams): Promise<ProveResult> {
     const inputs = padNotes(params.inputNotes, 8);
     const hasNote = inputs.map((n) => (n.value > 0n ? "1" : "0"));
+    const defaultPath = () => new Array(20).fill("0");
 
     return this.prove("wealth_proof", {
       spending_key: hexToBigInt(params.spendingKey).toString(),
@@ -162,8 +171,12 @@ export class HolancProver {
       note_blinding: inputs.map((n) => hexToBigInt(n.blinding).toString()),
       note_asset_id: inputs.map((n) => hexToBigInt(n.assetId).toString()),
       has_note: hasNote,
-      merkle_path_elements: inputs.map(() => new Array(20).fill("0")),
-      merkle_path_indices: inputs.map(() => new Array(20).fill("0")),
+      merkle_path_elements: inputs.map(
+        (_, i) => params.merklePathElements?.[i] ?? defaultPath(),
+      ),
+      merkle_path_indices: inputs.map(
+        (_, i) => params.merklePathIndices?.[i] ?? defaultPath(),
+      ),
       threshold: params.threshold.toString(),
     });
   }
@@ -243,15 +256,19 @@ export class HolancProver {
     // Pad to exactly 2 inputs
     const inputs = padNotes(inputNotes, 2);
     const outputs = padNotes(outputNotes, 2);
+    const defaultPath = () => new Array(20).fill("0");
 
     return {
       spending_key: hexToBigInt(spendingKey).toString(),
       input_value: inputs.map((n) => n.value.toString()),
       input_blinding: inputs.map((n) => hexToBigInt(n.blinding).toString()),
       input_asset_id: inputs.map((n) => hexToBigInt(n.assetId).toString()),
-      // Merkle proof placeholders — filled by caller or fetched from tree
-      merkle_path_elements: inputs.map(() => new Array(20).fill("0")),
-      merkle_path_indices: inputs.map(() => new Array(20).fill("0")),
+      merkle_path_elements: inputs.map(
+        (_, i) => params.merklePathElements?.[i] ?? defaultPath(),
+      ),
+      merkle_path_indices: inputs.map(
+        (_, i) => params.merklePathIndices?.[i] ?? defaultPath(),
+      ),
       output_owner: outputs.map((n) => hexToBigInt(n.owner).toString()),
       output_value: outputs.map((n) => n.value.toString()),
       output_blinding: outputs.map((n) => hexToBigInt(n.blinding).toString()),
@@ -283,6 +300,7 @@ export class HolancProver {
     const hasOut = (hasOutput || [])
       .concat(new Array(4).fill(false))
       .slice(0, 4);
+    const defaultPath = () => new Array(20).fill("0");
 
     return {
       spending_key: hexToBigInt(spendingKey).toString(),
@@ -290,8 +308,12 @@ export class HolancProver {
       blinding: inputs.map((n) => hexToBigInt(n.blinding).toString()),
       asset_id: inputs.map((n) => hexToBigInt(n.assetId).toString()),
       has_input: hasIn.map((v: boolean) => (v ? "1" : "0")),
-      merkle_path_elements: inputs.map(() => new Array(20).fill("0")),
-      merkle_path_indices: inputs.map(() => new Array(20).fill("0")),
+      merkle_path_elements: inputs.map(
+        (_, i) => params.merklePathElements?.[i] ?? defaultPath(),
+      ),
+      merkle_path_indices: inputs.map(
+        (_, i) => params.merklePathIndices?.[i] ?? defaultPath(),
+      ),
       output_owner: outputs.map((n) => hexToBigInt(n.owner).toString()),
       output_value: outputs.map((n) => n.value.toString()),
       output_blinding: outputs.map((n) => hexToBigInt(n.blinding).toString()),

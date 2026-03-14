@@ -136,10 +136,7 @@ describe("RelayQueue", () => {
 describe("Rate limiter behavior", () => {
   it("rate limit map tracks per-IP counts", () => {
     // Verify the sliding window concept: new entry should have count=1
-    const requestCounts = new Map<
-      string,
-      { count: number; resetAt: number }
-    >();
+    const requestCounts = new Map<string, { count: number; resetAt: number }>();
 
     const ip = "127.0.0.1";
     const now = Date.now();

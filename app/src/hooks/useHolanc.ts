@@ -41,7 +41,8 @@ const MNEMONIC_KEY = "holanc_mnemonic";
 /** Extract a readable error message from an unknown thrown value. */
 function describeError(e: unknown, fallback: string): string {
   if (e instanceof Error) {
-    if (e.message.includes("User rejected")) return "Transaction rejected by wallet";
+    if (e.message.includes("User rejected"))
+      return "Transaction rejected by wallet";
     if (e.message.includes("Insufficient")) return e.message;
     return e.message || fallback;
   }

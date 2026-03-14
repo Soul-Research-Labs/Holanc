@@ -4,22 +4,20 @@ include "../lib/common.circom";
 
 /// Stealth transfer circuit (2-in-2-out with stealth address support).
 ///
-/// Extends the base transfer circuit by proving that the sender correctly
-/// derived a stealth address for the recipient using ECDH-style key exchange.
-///
-/// The stealth owner is: Poseidon(recipient_spending_pubkey, shared_secret)
-/// where shared_secret = Poseidon(ephemeral_key, recipient_spending_pubkey)
+/// Uses BabyJubJub ECDH for commutative key agreement so recipients can
+/// scan for their notes without knowing the sender's ephemeral secret.
 ///
 /// Public inputs:
 ///   - merkle_root
 ///   - nullifiers[2]
 ///   - output_commitments[2]
 ///   - fee
-///   - ephemeral_pubkey              (for recipient scanning)
+///   - ephemeral_pubkey[2]            (x, y on BabyJubJub for recipient scanning)
 ///
 /// Private inputs (in addition to transfer):
-///   - ephemeral_key                 (sender's ephemeral scalar)
-///   - recipient_spending_pubkey     (recipient's public key)
+///   - ephemeral_key                  (sender's ephemeral scalar)
+///   - recipient_viewing_pubkey[2]    (recipient's viewing pubkey point)
+///   - recipient_spending_pubkey      (recipient's spending pubkey scalar)
 template StealthTransfer(tree_depth) {
     // ---------------------------------------------------------------
     // Public inputs
@@ -28,12 +26,13 @@ template StealthTransfer(tree_depth) {
     signal input nullifiers[2];
     signal input output_commitments[2];
     signal input fee;
-    signal input ephemeral_pubkey;
+    signal input ephemeral_pubkey[2];  // (x, y) on BabyJubJub
 
     // ---------------------------------------------------------------
     // Private inputs — stealth derivation
     // ---------------------------------------------------------------
     signal input ephemeral_key;
+    signal input recipient_viewing_pubkey[2];   // (x, y) on BabyJubJub
     signal input recipient_spending_pubkey;
 
     // ---------------------------------------------------------------
@@ -58,29 +57,20 @@ template StealthTransfer(tree_depth) {
     signal input out_blinding[2];
 
     // ---------------------------------------------------------------
-    // Step 0: Verify ephemeral_pubkey derivation
-    //   ephemeral_pubkey == Poseidon(ephemeral_key)
+    // Step 0: BabyJubJub ECDH stealth address derivation
     // ---------------------------------------------------------------
-    component eph_pub = Poseidon(1);
-    eph_pub.inputs[0] <== ephemeral_key;
-    eph_pub.out === ephemeral_pubkey;
+    component ecdh = StealthECDH();
+    ecdh.ephemeral_key <== ephemeral_key;
+    ecdh.recipient_viewing_pubkey[0] <== recipient_viewing_pubkey[0];
+    ecdh.recipient_viewing_pubkey[1] <== recipient_viewing_pubkey[1];
+    ecdh.recipient_spending_pubkey <== recipient_spending_pubkey;
 
-    // ---------------------------------------------------------------
-    // Step 0b: Derive stealth address and verify output[0] uses it
-    //   shared_secret = Poseidon(ephemeral_key, recipient_spending_pubkey)
-    //   stealth_owner = Poseidon(recipient_spending_pubkey, shared_secret)
-    //   out_owner[0] === stealth_owner
-    // ---------------------------------------------------------------
-    component shared_secret = Poseidon(2);
-    shared_secret.inputs[0] <== ephemeral_key;
-    shared_secret.inputs[1] <== recipient_spending_pubkey;
-
-    component stealth_owner = Poseidon(2);
-    stealth_owner.inputs[0] <== recipient_spending_pubkey;
-    stealth_owner.inputs[1] <== shared_secret.out;
+    // Constrain public ephemeral_pubkey to match ECDH derivation
+    ecdh.ephemeral_pubkey[0] === ephemeral_pubkey[0];
+    ecdh.ephemeral_pubkey[1] === ephemeral_pubkey[1];
 
     // The first output note MUST go to the stealth address
-    out_owner[0] === stealth_owner.out;
+    out_owner[0] === ecdh.stealth_owner;
 
     // ---------------------------------------------------------------
     // Step 1: Verify input note commitments + Merkle inclusion

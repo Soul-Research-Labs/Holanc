@@ -2,26 +2,44 @@ import { Hash32 } from "./types";
 import { poseidonHashHex, hexToField } from "./poseidon";
 
 /**
- * Stealth address support for the Holanc privacy protocol.
+ * Stealth address support using BabyJubJub ECDH.
  *
- * Allows senders to derive one-time addresses for recipients without
- * requiring the recipient to publish a fresh address for each transaction.
- *
- * Protocol:
- *   1. Recipient publishes a stealth meta-address (spendingPubkey, viewingPubkey).
- *   2. Sender generates an ephemeral keypair (scalar, publicKey).
- *   3. Sender computes sharedSecret = Hash(ephemeralScalar, viewingPubkey).
- *   4. Sender derives stealthOwner = Hash(spendingPubkey, sharedSecret).
- *   5. Sender creates output note with owner = stealthOwner.
- *   6. Sender publishes ephemeralPubkey alongside the encrypted note.
- *   7. Recipient scans: recompute sharedSecret using viewingKey + ephemeralPubkey.
+ * Protocol (commutative key agreement):
+ *   1. Recipient publishes (spendingPubkey, viewingPubkey) where
+ *      viewingPubkey = viewingKey * G on BabyJubJub.
+ *   2. Sender generates ephemeral scalar r, computes R = r * G.
+ *   3. Sender: shared_point = r * viewingPubkey (ECDH).
+ *   4. Sender: sharedSecret = Poseidon(shared_point.x, shared_point.y).
+ *   5. Sender: stealthOwner = Poseidon(spendingPubkey, sharedSecret).
+ *   6. Recipient: shared_point = viewingKey * R (commutativity ⟹ same point).
+ *   7. Recipient: verifies Poseidon(spendingPubkey, sharedSecret) == note.owner.
  */
+
+// Lazy-loaded BabyJubJub instance
+let _babyjub: any = null;
+let _poseidon: any = null;
+
+async function getBabyjub() {
+  if (!_babyjub) {
+    const circomlibjs = await import("circomlibjs");
+    _babyjub = await circomlibjs.buildBabyjub();
+  }
+  return _babyjub;
+}
+
+async function getPoseidon() {
+  if (!_poseidon) {
+    const circomlibjs = await import("circomlibjs");
+    _poseidon = await circomlibjs.buildPoseidon();
+  }
+  return _poseidon;
+}
 
 export interface StealthMetaAddress {
   /** The recipient's spending public key (Poseidon(spending_key)). */
   spendingPubkey: Hash32;
-  /** The recipient's viewing public key (derived from viewing key). */
-  viewingPubkey: Hash32;
+  /** The recipient's viewing public key — BabyJubJub point [x, y] as hex strings. */
+  viewingPubkey: [Hash32, Hash32];
 }
 
 export interface StealthSendResult {
@@ -29,8 +47,8 @@ export interface StealthSendResult {
   stealthOwner: Hash32;
   /** The shared secret for note encryption. */
   sharedSecret: Hash32;
-  /** The ephemeral public key (published on-chain for scanning). */
-  ephemeralPubkey: Hash32;
+  /** The ephemeral public key — BabyJubJub point [x, y] as hex strings. */
+  ephemeralPubkey: [Hash32, Hash32];
   /** The ephemeral secret scalar (private, for circuit witness). */
   ephemeralKey: Hash32;
 }
@@ -43,64 +61,104 @@ export interface StealthScanResult {
 }
 
 /**
- * Generate a stealth address for a recipient.
- *
- * Uses hash-based key exchange (will be replaced by BabyJubJub ECDH in production).
- * This matches the circuit constraints in stealth_transfer.circom:
- *   ephemeralPubkey = Poseidon(ephemeralKey)
- *   sharedSecret = Poseidon(ephemeralKey, recipientSpendingPubkey)
- *   stealthOwner = Poseidon(recipientSpendingPubkey, sharedSecret)
+ * Convert a BabyJubJub field element to a hex string.
+ */
+function fieldToHex(F: any, el: any): Hash32 {
+  return F.toObject(el).toString(16).padStart(64, "0");
+}
+
+/**
+ * Convert a hex string to a BabyJubJub field element.
+ */
+function hexToFieldBjj(F: any, hex: Hash32): any {
+  return F.e(BigInt("0x" + hex));
+}
+
+/**
+ * Generate a stealth address for a recipient using BabyJubJub ECDH.
  */
 export async function stealthSend(
   recipientMeta: StealthMetaAddress,
 ): Promise<StealthSendResult> {
+  const babyjub = await getBabyjub();
+  const poseidon = await getPoseidon();
+  const F = babyjub.F;
+
   // Generate ephemeral scalar
   const ephemeralBytes = crypto.getRandomValues(new Uint8Array(32));
-  const ephemeralKey = bytesToHex(ephemeralBytes);
+  // Reduce mod subgroup order to get a valid scalar
+  const ephemeralScalar = BigInt(
+    "0x" + bytesToHex(ephemeralBytes),
+  ) % babyjub.subOrder;
+  const ephemeralKey = ephemeralScalar.toString(16).padStart(64, "0");
 
-  // ephemeralPubkey = Poseidon(ephemeralKey) — matches Poseidon(ephemeral_key) in circuit
-  const ephemeralPubkey = await poseidonHashHex([hexToField(ephemeralKey)]);
+  // R = ephemeralScalar * G (BabyJubJub base point)
+  const ephemeralPubPoint = babyjub.mulPointEscalar(
+    babyjub.Base8,
+    ephemeralScalar,
+  );
+  const ephemeralPubkey: [Hash32, Hash32] = [
+    fieldToHex(F, ephemeralPubPoint[0]),
+    fieldToHex(F, ephemeralPubPoint[1]),
+  ];
 
-  // sharedSecret = Poseidon(ephemeralKey, recipientSpendingPubkey)
-  const sharedSecret = await poseidonHashHex([
-    hexToField(ephemeralKey),
-    hexToField(recipientMeta.spendingPubkey),
+  // Parse recipient's viewing pubkey as a BabyJubJub point
+  const viewingPoint = [
+    hexToFieldBjj(F, recipientMeta.viewingPubkey[0]),
+    hexToFieldBjj(F, recipientMeta.viewingPubkey[1]),
+  ];
+
+  // ECDH: shared_point = ephemeralScalar * viewingPubkey
+  const sharedPoint = babyjub.mulPointEscalar(viewingPoint, ephemeralScalar);
+
+  // sharedSecret = Poseidon(shared_point.x, shared_point.y)
+  const ssHash = poseidon([sharedPoint[0], sharedPoint[1]]);
+  const sharedSecret = fieldToHex(F, ssHash);
+
+  // stealthOwner = Poseidon(spendingPubkey, sharedSecret)
+  const ownerHash = poseidon([
+    hexToFieldBjj(F, recipientMeta.spendingPubkey),
+    ssHash,
   ]);
-
-  // stealthOwner = Poseidon(recipientSpendingPubkey, sharedSecret)
-  const stealthOwner = await poseidonHashHex([
-    hexToField(recipientMeta.spendingPubkey),
-    hexToField(sharedSecret),
-  ]);
+  const stealthOwner = fieldToHex(F, ownerHash);
 
   return { stealthOwner, sharedSecret, ephemeralPubkey, ephemeralKey };
 }
 
 /**
- * Scan a note to check if it belongs to us (recipient side).
+ * Scan a note to check if it belongs to us using BabyJubJub ECDH.
  *
- * Recomputes the stealth address from our keys and the sender's ephemeral pubkey.
+ * The recipient computes: shared_point = viewingKey * R
+ * By ECDH commutativity, this equals the sender's r * viewingPubkey.
  */
 export async function stealthScan(
   viewingKey: Hash32,
   spendingPubkey: Hash32,
-  ephemeralPubkey: Hash32,
+  ephemeralPubkey: [Hash32, Hash32],
   noteOwner: Hash32,
 ): Promise<StealthScanResult> {
-  // In the hash-based scheme, the recipient recomputes the shared secret:
-  //   sharedSecret = Poseidon(ephemeralPubkey, viewingKey)
-  // This is consistent when sender uses Poseidon(ephemeralKey, spendingPubkey)
-  // because in production, the ECDH would be: ephemeralKey * viewingPubkey == viewingKey * ephemeralPubkey
-  const sharedSecret = await poseidonHashHex([
-    hexToField(ephemeralPubkey),
-    hexToField(viewingKey),
-  ]);
+  const babyjub = await getBabyjub();
+  const poseidon = await getPoseidon();
+  const F = babyjub.F;
+
+  const viewingScalar = BigInt("0x" + viewingKey) % babyjub.subOrder;
+
+  // Parse ephemeral pubkey as a BabyJubJub point
+  const ephPoint = [
+    hexToFieldBjj(F, ephemeralPubkey[0]),
+    hexToFieldBjj(F, ephemeralPubkey[1]),
+  ];
+
+  // ECDH: shared_point = viewingKey * R (== r * viewingPubkey)
+  const sharedPoint = babyjub.mulPointEscalar(ephPoint, viewingScalar);
+
+  // sharedSecret = Poseidon(shared_point.x, shared_point.y)
+  const ssHash = poseidon([sharedPoint[0], sharedPoint[1]]);
+  const sharedSecret = fieldToHex(F, ssHash);
 
   // expectedOwner = Poseidon(spendingPubkey, sharedSecret)
-  const expectedOwner = await poseidonHashHex([
-    hexToField(spendingPubkey),
-    hexToField(sharedSecret),
-  ]);
+  const ownerHash = poseidon([hexToFieldBjj(F, spendingPubkey), ssHash]);
+  const expectedOwner = fieldToHex(F, ownerHash);
 
   if (expectedOwner === noteOwner) {
     return { isOurs: true, sharedSecret };
@@ -110,15 +168,40 @@ export async function stealthScan(
 }
 
 /**
- * Derive the stealth spending key for spending a note received at a stealth address.
+ * Derive the stealth spending key for spending a note at a stealth address.
  *
- * stealthSpendingKey = Hash(spendingKey, sharedSecret)
+ * stealthSpendingKey = Poseidon(spendingKey, sharedSecret)
  */
 export async function deriveStealthSpendingKey(
   spendingKey: Hash32,
   sharedSecret: Hash32,
 ): Promise<Hash32> {
   return poseidonHashHex([hexToField(spendingKey), hexToField(sharedSecret)]);
+}
+
+/**
+ * Generate a BabyJubJub keypair for stealth meta-address.
+ *
+ * Returns { secretKey, publicKey: [x, y] } where publicKey = secretKey * G.
+ */
+export async function generateBjjKeypair(): Promise<{
+  secretKey: Hash32;
+  publicKey: [Hash32, Hash32];
+}> {
+  const babyjub = await getBabyjub();
+  const F = babyjub.F;
+
+  const secretBytes = crypto.getRandomValues(new Uint8Array(32));
+  const secret = BigInt("0x" + bytesToHex(secretBytes)) % babyjub.subOrder;
+  const secretKey = secret.toString(16).padStart(64, "0");
+
+  const pubPoint = babyjub.mulPointEscalar(babyjub.Base8, secret);
+  const publicKey: [Hash32, Hash32] = [
+    fieldToHex(F, pubPoint[0]),
+    fieldToHex(F, pubPoint[1]),
+  ];
+
+  return { secretKey, publicKey };
 }
 
 function bytesToHex(bytes: Uint8Array): Hash32 {

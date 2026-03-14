@@ -122,7 +122,7 @@ cargo run --bin holanc-cli
 | Note commitment       | `Poseidon(owner, value, asset_id, blinding)`             |
 | Nullifier (V1)        | `Poseidon(spending_key, commitment)`                     |
 | Nullifier (V2)        | `Poseidon(Poseidon(sk, cm), Poseidon(chain_id, app_id))` |
-| Merkle tree           | Incremental Poseidon tree (depth 20) + on-chain SHA-256 |
+| Merkle tree           | Incremental Poseidon tree (depth 20) + on-chain SHA-256  |
 | Proving system        | Groth16 on BN254                                         |
 | On-chain verification | Solana `alt_bn128` syscalls (add, mul, pairing)          |
 | Note encryption       | ChaCha20-Poly1305 with HKDF-SHA256 key derivation        |
@@ -172,12 +172,12 @@ npm run dev
 
 ## Testing
 
-| Runner | Command | Scope |
-|--------|---------|-------|
-| Cargo (Rust) | `cargo test` | 60 unit/integration tests across primitives, note, tree, client, prover |
-| ts-mocha (Anchor) | `anchor test` | Smoke tests, pool/verifier/nullifier/bridge/compliance instructions, full E2E flow |
-| Jest (SDK) | `cd sdk/typescript && npm test` | Poseidon, stealth addresses, wallet, encryption |
-| Next.js build | `cd app && npm run build` | Type-checks and builds all 7 pages |
+| Runner            | Command                         | Scope                                                                              |
+| ----------------- | ------------------------------- | ---------------------------------------------------------------------------------- |
+| Cargo (Rust)      | `cargo test`                    | 60 unit/integration tests across primitives, note, tree, client, prover            |
+| ts-mocha (Anchor) | `anchor test`                   | Smoke tests, pool/verifier/nullifier/bridge/compliance instructions, full E2E flow |
+| Jest (SDK)        | `cd sdk/typescript && npm test` | Poseidon, stealth addresses, wallet, encryption                                    |
+| Next.js build     | `cd app && npm run build`       | Type-checks and builds all 7 pages                                                 |
 
 ## Docker
 
@@ -200,6 +200,7 @@ See [docs/](docs/) for detailed protocol documentation:
 - [Threat Model](docs/threat-model.md) — Trust assumptions and adversary models
 - [API Reference](docs/api-reference.md) — Full API docs for programs, SDK, and relayer
 - [Getting Started](docs/getting-started.md) — Setup guide
+
 ```
 
 Pages: Dashboard, Deposit, Transfer, Withdraw, Stealth Addresses, Cross-Chain Bridge, Compliance.
@@ -207,3 +208,4 @@ Pages: Dashboard, Deposit, Transfer, Withdraw, Stealth Addresses, Cross-Chain Br
 ## License
 
 MIT OR Apache-2.0
+```

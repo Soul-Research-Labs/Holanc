@@ -1,6 +1,10 @@
 pragma circom 2.1.0;
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
+include "../node_modules/circomlib/circuits/babyjub.circom";
+include "../node_modules/circomlib/circuits/escalarmulfix.circom";
+include "../node_modules/circomlib/circuits/escalarmulany.circom";
+include "../node_modules/circomlib/circuits/bitify.circom";
 
 /// Compute a note commitment: Poseidon(owner, value, asset_id, blinding)
 /// Matches the off-chain commitment in holanc-primitives.
@@ -98,4 +102,62 @@ template RangeCheck(n) {
         sum += bits[i] * (1 << i);
     }
     value === sum;
+}
+
+/// BabyJubJub ECDH-based stealth address derivation.
+///
+/// Replaces the hash-based stealth scheme with proper elliptic-curve
+/// Diffie-Hellman on BabyJubJub, enabling commutative key agreement:
+///   Sender:    shared_point = ephemeral_key * viewing_pubkey
+///   Recipient: shared_point = viewing_key  * ephemeral_pubkey
+///
+/// Outputs:
+///   ephemeral_pubkey[2]  — (x, y) of ephemeral_key * G
+///   shared_secret        — Poseidon(ecdh_point.x, ecdh_point.y)
+///   stealth_owner        — Poseidon(spending_pubkey, shared_secret)
+template StealthECDH() {
+    signal input ephemeral_key;
+    signal input recipient_viewing_pubkey[2];   // (x, y) on BabyJubJub
+    signal input recipient_spending_pubkey;      // field element
+    signal output ephemeral_pubkey[2];
+    signal output shared_secret;
+    signal output stealth_owner;
+
+    // BabyJubJub base point (same as circomlib's Base8)
+    var BASE8[2] = [
+        5299619240641551281634865583518297030282874472190772894086521144482721001553,
+        16950150798460657717958625567821834550301663161624707787222815936182638968203
+    ];
+
+    // Decompose ephemeral_key to 253 bits for scalar multiplication
+    component eph_bits = Num2Bits(253);
+    eph_bits.in <== ephemeral_key;
+
+    // ephemeral_pubkey = ephemeral_key * G (fixed-base scalar mul)
+    component eph_mul = EscalarMulFix(253, BASE8);
+    for (var i = 0; i < 253; i++) {
+        eph_mul.e[i] <== eph_bits.out[i];
+    }
+    ephemeral_pubkey[0] <== eph_mul.out[0];
+    ephemeral_pubkey[1] <== eph_mul.out[1];
+
+    // shared_point = ephemeral_key * viewing_pubkey (any-base ECDH)
+    component ecdh_mul = EscalarMulAny(253);
+    for (var i = 0; i < 253; i++) {
+        ecdh_mul.e[i] <== eph_bits.out[i];
+    }
+    ecdh_mul.p[0] <== recipient_viewing_pubkey[0];
+    ecdh_mul.p[1] <== recipient_viewing_pubkey[1];
+
+    // Hash ECDH point into a scalar: shared_secret = Poseidon(point.x, point.y)
+    component ss_hash = Poseidon(2);
+    ss_hash.inputs[0] <== ecdh_mul.out[0];
+    ss_hash.inputs[1] <== ecdh_mul.out[1];
+    shared_secret <== ss_hash.out;
+
+    // stealth_owner = Poseidon(spending_pubkey, shared_secret)
+    component so = Poseidon(2);
+    so.inputs[0] <== recipient_spending_pubkey;
+    so.inputs[1] <== shared_secret;
+    stealth_owner <== so.out;
 }

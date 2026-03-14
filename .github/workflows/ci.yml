@@ -14,7 +14,7 @@ env:
 
 jobs:
   rust:
-    name: Rust (check + test + clippy)
+    name: Rust (check + test + clippy + fmt)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,11 +41,18 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
-        continue-on-error: true
 
       - name: Format check
         run: cargo fmt -- --check
-        continue-on-error: true
+
+  security-audit:
+    name: Cargo security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   circuits:
     name: Circom circuits (compile)
@@ -74,7 +81,7 @@ jobs:
           ./scripts/setup-circuits.sh
 
   anchor:
-    name: Anchor build
+    name: Anchor build + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,8 +108,15 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      - name: Generate keypair
+        run: solana-keygen new --no-bip39-passphrase --silent
+
       - name: Build programs
         run: anchor build
+
+      - name: Run Anchor tests
+        run: anchor test --skip-local-validator
+        continue-on-error: true
 
       - name: Cache build
         uses: actions/cache@v4
@@ -131,7 +145,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Build
         run: npm run build
@@ -158,4 +171,43 @@ jobs:
 
       - name: Test
         run: npm test
-        continue-on-error: true
+
+  relayer:
+    name: Relayer (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relayer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+  indexer:
+    name: Indexer (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: indexer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build

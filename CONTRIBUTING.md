@@ -36,15 +36,15 @@ See [docs/getting-started.md](docs/getting-started.md) for detailed prerequisite
 
 ## Project Areas
 
-| Area | Path | Language |
-|------|------|----------|
-| On-chain programs | `programs/` | Rust (Anchor) |
-| Off-chain libraries | `crates/` | Rust |
-| ZK circuits | `circuits/` | Circom |
-| TypeScript SDK | `sdk/typescript/` | TypeScript |
-| Frontend | `app/` | TypeScript (Next.js) |
-| Infrastructure | `relayer/`, `indexer/`, `deploy/` | TypeScript, Docker |
-| Tests | `tests/` | TypeScript (Mocha) |
+| Area                | Path                              | Language             |
+| ------------------- | --------------------------------- | -------------------- |
+| On-chain programs   | `programs/`                       | Rust (Anchor)        |
+| Off-chain libraries | `crates/`                         | Rust                 |
+| ZK circuits         | `circuits/`                       | Circom               |
+| TypeScript SDK      | `sdk/typescript/`                 | TypeScript           |
+| Frontend            | `app/`                            | TypeScript (Next.js) |
+| Infrastructure      | `relayer/`, `indexer/`, `deploy/` | TypeScript, Docker   |
+| Tests               | `tests/`                          | TypeScript (Mocha)   |
 
 ## Security
 

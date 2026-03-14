@@ -4,16 +4,15 @@ include "../lib/common.circom";
 
 /// Stealth transfer circuit with cross-chain V2 nullifiers (2-in-2-out).
 ///
-/// Identical to StealthTransfer but uses NullifierV2 (domain-separated by
-/// chain_id + app_id) instead of NullifierV1, enabling the same note to
-/// be safely used across multiple SVM chains without nullifier collision.
+/// Uses BabyJubJub ECDH for commutative stealth key agreement and
+/// NullifierV2 (domain-separated by chain_id + app_id) for cross-chain safety.
 ///
 /// Public inputs:
 ///   - merkle_root
 ///   - nullifiers[2]
 ///   - output_commitments[2]
 ///   - fee
-///   - ephemeral_pubkey
+///   - ephemeral_pubkey[2]           (x, y on BabyJubJub)
 ///   - chain_id
 ///   - app_id
 template StealthTransferV2(tree_depth) {
@@ -24,7 +23,7 @@ template StealthTransferV2(tree_depth) {
     signal input nullifiers[2];
     signal input output_commitments[2];
     signal input fee;
-    signal input ephemeral_pubkey;
+    signal input ephemeral_pubkey[2];  // (x, y) on BabyJubJub
     signal input chain_id;
     signal input app_id;
 
@@ -32,6 +31,7 @@ template StealthTransferV2(tree_depth) {
     // Private inputs — stealth derivation
     // ---------------------------------------------------------------
     signal input ephemeral_key;
+    signal input recipient_viewing_pubkey[2];   // (x, y) on BabyJubJub
     signal input recipient_spending_pubkey;
 
     // ---------------------------------------------------------------
@@ -56,24 +56,18 @@ template StealthTransferV2(tree_depth) {
     signal input out_blinding[2];
 
     // ---------------------------------------------------------------
-    // Step 0: Verify ephemeral_pubkey derivation
+    // Step 0: BabyJubJub ECDH stealth address derivation
     // ---------------------------------------------------------------
-    component eph_pub = Poseidon(1);
-    eph_pub.inputs[0] <== ephemeral_key;
-    eph_pub.out === ephemeral_pubkey;
+    component ecdh = StealthECDH();
+    ecdh.ephemeral_key <== ephemeral_key;
+    ecdh.recipient_viewing_pubkey[0] <== recipient_viewing_pubkey[0];
+    ecdh.recipient_viewing_pubkey[1] <== recipient_viewing_pubkey[1];
+    ecdh.recipient_spending_pubkey <== recipient_spending_pubkey;
 
-    // ---------------------------------------------------------------
-    // Step 0b: Derive stealth address and verify output[0] uses it
-    // ---------------------------------------------------------------
-    component shared_secret = Poseidon(2);
-    shared_secret.inputs[0] <== ephemeral_key;
-    shared_secret.inputs[1] <== recipient_spending_pubkey;
+    ecdh.ephemeral_pubkey[0] === ephemeral_pubkey[0];
+    ecdh.ephemeral_pubkey[1] === ephemeral_pubkey[1];
 
-    component stealth_owner = Poseidon(2);
-    stealth_owner.inputs[0] <== recipient_spending_pubkey;
-    stealth_owner.inputs[1] <== shared_secret.out;
-
-    out_owner[0] === stealth_owner.out;
+    out_owner[0] === ecdh.stealth_owner;
 
     // ---------------------------------------------------------------
     // Step 1: Verify input note commitments + nullifiers (V2) + Merkle
