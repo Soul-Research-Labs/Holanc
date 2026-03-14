@@ -7,7 +7,9 @@ import {
   sendAndConfirmTransaction,
   SystemProgram,
   ComputeBudgetProgram,
+  SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { HolancWallet } from "./wallet";
 import { HolancProver } from "./prover";
 import {
@@ -17,11 +19,7 @@ import {
   PoolStatus,
   Hash32,
 } from "./types";
-import {
-  FailoverConnection,
-  FailoverConfig,
-  RpcEndpointConfig,
-} from "./rpc";
+import { FailoverConnection, FailoverConfig, RpcEndpointConfig } from "./rpc";
 
 /** Program IDs — must match deployed Anchor programs. */
 const POOL_PROGRAM_ID = new PublicKey(
@@ -32,6 +30,9 @@ const VERIFIER_PROGRAM_ID = new PublicKey(
 );
 const NULLIFIER_PROGRAM_ID = new PublicKey(
   "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+);
+const BRIDGE_PROGRAM_ID = new PublicKey(
+  "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
 );
 
 /**
@@ -175,7 +176,12 @@ export class HolancClient {
   async transfer(
     recipientOwner: Hash32,
     amount: bigint,
+    tokenMint: PublicKey,
     fee: bigint = 0n,
+    feeCollector?: PublicKey,
+    verificationKey?: PublicKey,
+    nullifierManager?: PublicKey,
+    nullifierPage?: PublicKey,
   ): Promise<TransferResult> {
     const { inputNotes, outputNotes } = await this.wallet.prepareTransfer(
       recipientOwner,
@@ -204,11 +210,41 @@ export class HolancClient {
     // Mark input notes as spent in local wallet
     this.wallet.markSpent(inputNotes);
 
-    // Build and submit the transfer transaction on-chain
+    // Derive all required PDAs — pool PDA uses [b"pool", tokenMint]
     const [poolPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("pool")],
+      [Buffer.from("pool"), tokenMint.toBuffer()],
       POOL_PROGRAM_ID,
     );
+    const [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), poolPda.toBuffer()],
+      POOL_PROGRAM_ID,
+    );
+    const [vaultAuthPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault_auth"), poolPda.toBuffer()],
+      POOL_PROGRAM_ID,
+    );
+
+    // Derive bridge commitment lock PDAs for each nullifier (may not exist)
+    const [lockPda1] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[0], "hex")],
+      BRIDGE_PROGRAM_ID,
+    );
+    const [lockPda2] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[1], "hex")],
+      BRIDGE_PROGRAM_ID,
+    );
+
+    // Derive nullifier manager PDA if not provided
+    const nullMgr = nullifierManager ?? PublicKey.findProgramAddressSync(
+      [Buffer.from("nullifier_mgr"), poolPda.toBuffer()],
+      NULLIFIER_PROGRAM_ID,
+    )[0];
+
+    // Nullifier page — caller should provide; default to page 0
+    const nullPage = nullifierPage ?? PublicKey.findProgramAddressSync(
+      [Buffer.from("nullifier_page"), poolPda.toBuffer(), Buffer.alloc(8)],
+      NULLIFIER_PROGRAM_ID,
+    )[0];
 
     const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: 400_000,
@@ -225,8 +261,18 @@ export class HolancClient {
       programId: POOL_PROGRAM_ID,
       keys: [
         { pubkey: poolPda, isSigner: false, isWritable: true },
-        { pubkey: NULLIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: vaultPda, isSigner: false, isWritable: true },
+        { pubkey: vaultAuthPda, isSigner: false, isWritable: false },
+        { pubkey: feeCollector ?? this.payer.publicKey, isSigner: false, isWritable: true },
         { pubkey: VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: verificationKey ?? PublicKey.default, isSigner: false, isWritable: false },
+        { pubkey: NULLIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: nullMgr, isSigner: false, isWritable: true },
+        { pubkey: nullPage, isSigner: false, isWritable: true },
+        { pubkey: this.payer.publicKey, isSigner: true, isWritable: false },
+        { pubkey: lockPda1, isSigner: false, isWritable: false },
+        { pubkey: lockPda2, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       ],
       data: transferData,
     });
@@ -248,8 +294,13 @@ export class HolancClient {
    */
   async withdraw(
     amount: bigint,
+    tokenMint: PublicKey,
     recipientTokenAccount: PublicKey,
     fee: bigint = 0n,
+    feeCollector?: PublicKey,
+    verificationKey?: PublicKey,
+    nullifierManager?: PublicKey,
+    nullifierPage?: PublicKey,
   ): Promise<WithdrawResult> {
     const { inputNotes, outputNotes } = await this.wallet.prepareWithdraw(
       amount,
@@ -271,11 +322,39 @@ export class HolancClient {
 
     this.wallet.markSpent(inputNotes);
 
-    // Build and submit the withdraw transaction on-chain
+    // Derive all required PDAs — pool PDA uses [b"pool", tokenMint]
     const [poolPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("pool")],
+      [Buffer.from("pool"), tokenMint.toBuffer()],
       POOL_PROGRAM_ID,
     );
+    const [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), poolPda.toBuffer()],
+      POOL_PROGRAM_ID,
+    );
+    const [vaultAuthPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault_auth"), poolPda.toBuffer()],
+      POOL_PROGRAM_ID,
+    );
+
+    // Bridge commitment lock PDAs
+    const [lockPda1] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[0], "hex")],
+      BRIDGE_PROGRAM_ID,
+    );
+    const [lockPda2] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[1], "hex")],
+      BRIDGE_PROGRAM_ID,
+    );
+
+    const nullMgr = nullifierManager ?? PublicKey.findProgramAddressSync(
+      [Buffer.from("nullifier_mgr"), poolPda.toBuffer()],
+      NULLIFIER_PROGRAM_ID,
+    )[0];
+
+    const nullPage = nullifierPage ?? PublicKey.findProgramAddressSync(
+      [Buffer.from("nullifier_page"), poolPda.toBuffer(), Buffer.alloc(8)],
+      NULLIFIER_PROGRAM_ID,
+    )[0];
 
     const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: 400_000,
@@ -292,9 +371,19 @@ export class HolancClient {
       programId: POOL_PROGRAM_ID,
       keys: [
         { pubkey: poolPda, isSigner: false, isWritable: true },
+        { pubkey: vaultPda, isSigner: false, isWritable: true },
+        { pubkey: vaultAuthPda, isSigner: false, isWritable: false },
         { pubkey: recipientTokenAccount, isSigner: false, isWritable: true },
-        { pubkey: NULLIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: feeCollector ?? this.payer.publicKey, isSigner: false, isWritable: true },
         { pubkey: VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: verificationKey ?? PublicKey.default, isSigner: false, isWritable: false },
+        { pubkey: NULLIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: nullMgr, isSigner: false, isWritable: true },
+        { pubkey: nullPage, isSigner: false, isWritable: true },
+        { pubkey: this.payer.publicKey, isSigner: true, isWritable: false },
+        { pubkey: lockPda1, isSigner: false, isWritable: false },
+        { pubkey: lockPda2, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       ],
       data: withdrawData,
     });
@@ -463,33 +552,29 @@ export class HolancClient {
 
   private serializeProof(proof: any): Buffer {
     // Serialize Groth16 proof to fixed-size bytes: pi_a (64) + pi_b (128) + pi_c (64) = 256
+    // Field elements are encoded as 32-byte big-endian to match BN254 convention.
     const parts: Buffer[] = [];
     for (const val of proof.piA) {
-      const buf = Buffer.alloc(32);
-      const bi = BigInt(val);
-      for (let i = 0; i < 32; i++) {
-        buf[i] = Number((bi >> BigInt(i * 8)) & 0xffn);
-      }
-      parts.push(buf);
+      parts.push(bigintToBeBytes(BigInt(val)));
     }
     for (const pair of proof.piB) {
       for (const val of pair) {
-        const buf = Buffer.alloc(32);
-        const bi = BigInt(val);
-        for (let i = 0; i < 32; i++) {
-          buf[i] = Number((bi >> BigInt(i * 8)) & 0xffn);
-        }
-        parts.push(buf);
+        parts.push(bigintToBeBytes(BigInt(val)));
       }
     }
     for (const val of proof.piC) {
-      const buf = Buffer.alloc(32);
-      const bi = BigInt(val);
-      for (let i = 0; i < 32; i++) {
-        buf[i] = Number((bi >> BigInt(i * 8)) & 0xffn);
-      }
-      parts.push(buf);
+      parts.push(bigintToBeBytes(BigInt(val)));
     }
     return Buffer.concat(parts);
   }
+}
+
+/** Encode a BigInt as a 32-byte big-endian buffer. */
+function bigintToBeBytes(bi: bigint): Buffer {
+  const buf = Buffer.alloc(32);
+  for (let i = 31; i >= 0; i--) {
+    buf[i] = Number(bi & 0xffn);
+    bi >>= 8n;
+  }
+  return buf;
 }
