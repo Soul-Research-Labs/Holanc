@@ -50,7 +50,7 @@ pub mod holanc_pool {
     use super::*;
 
     /// Initialize the privacy pool with a token mint and empty Merkle tree.
-    pub fn initialize(ctx: Context<Initialize>, pool_bump: u8) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         let pool_key = ctx.accounts.pool.key();
         let pool = &mut ctx.accounts.pool;
         pool.authority = ctx.accounts.authority.key();
@@ -61,7 +61,7 @@ pub mod holanc_pool {
         pool.root_history = [[0u8; 32]; ROOT_HISTORY_SIZE];
         pool.root_history_index = 0;
         pool.total_deposited = 0;
-        pool.bump = pool_bump;
+        pool.bump = ctx.bumps.pool;
         pool.is_paused = false;
         pool.epoch = 0;
 
@@ -457,10 +457,7 @@ pub mod holanc_pool {
     /// Emergency pause.
     pub fn set_paused(ctx: Context<AdminAction>, paused: bool) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
-        require!(
-            pool.authority == ctx.accounts.authority.key(),
-            HolancPoolError::Unauthorized
-        );
+        // has_one = authority constraint on AdminAction already validates caller
         pool.is_paused = paused;
         Ok(())
     }
@@ -518,6 +515,12 @@ fn assert_not_bridge_locked(
     );
     require!(
         *lock_account.key == expected_pda,
+        HolancPoolError::InvalidCommitmentLockPDA
+    );
+
+    // Verify account is owned by the bridge program to prevent spoofed lock accounts.
+    require!(
+        *lock_account.owner == BRIDGE_PROGRAM_ID,
         HolancPoolError::InvalidCommitmentLockPDA
     );
 
@@ -653,7 +656,6 @@ fn register_nullifier_cpi<'info>(
 // ---------------------------------------------------------------------------
 
 #[derive(Accounts)]
-#[instruction(pool_bump: u8)]
 pub struct Initialize<'info> {
     #[account(
         init,
@@ -694,13 +696,17 @@ pub struct Initialize<'info> {
 
 #[derive(Accounts)]
 pub struct Deposit<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"pool", pool.token_mint.as_ref()],
+        bump = pool.bump,
+    )]
     pub pool: Account<'info, PoolState>,
 
-    #[account(mut)]
+    #[account(mut, token::authority = depositor)]
     pub depositor_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    #[account(mut, address = pool.vault)]
     pub vault: Account<'info, TokenAccount>,
 
     pub depositor: Signer<'info>,
@@ -710,13 +716,18 @@ pub struct Deposit<'info> {
 
 #[derive(Accounts)]
 pub struct PrivateTransfer<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"pool", pool.token_mint.as_ref()],
+        bump = pool.bump,
+    )]
     pub pool: Account<'info, PoolState>,
 
-    #[account(mut)]
+    #[account(mut, address = pool.vault)]
     pub vault: Account<'info, TokenAccount>,
 
     /// CHECK: PDA authority over vault.
+    #[account(seeds = [b"vault_auth", pool.key().as_ref()], bump)]
     pub vault_authority: UncheckedAccount<'info>,
 
     /// Fee collector token account.
@@ -763,13 +774,18 @@ pub struct PrivateTransfer<'info> {
 
 #[derive(Accounts)]
 pub struct Withdraw<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"pool", pool.token_mint.as_ref()],
+        bump = pool.bump,
+    )]
     pub pool: Account<'info, PoolState>,
 
-    #[account(mut)]
+    #[account(mut, address = pool.vault)]
     pub vault: Account<'info, TokenAccount>,
 
     /// CHECK: PDA authority over vault.
+    #[account(seeds = [b"vault_auth", pool.key().as_ref()], bump)]
     pub vault_authority: UncheckedAccount<'info>,
 
     #[account(mut)]
@@ -826,7 +842,7 @@ pub struct UpdateRoot<'info> {
 
 #[derive(Accounts)]
 pub struct AdminAction<'info> {
-    #[account(mut)]
+    #[account(mut, has_one = authority)]
     pub pool: Account<'info, PoolState>,
 
     pub authority: Signer<'info>,
