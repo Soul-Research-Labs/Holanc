@@ -104,6 +104,44 @@ Nullifiers are grouped into time-bounded epochs. At epoch finalization, a Merkle
 3. **Value conservation**: Circuit constraints enforce `sum(inputs) = sum(outputs) + fee` with 64-bit range checks
 4. **Metadata resistance**: Fixed-size proof envelopes (2048 bytes), batched relay with dummy padding, timing jitter
 
+## Dual-Root Merkle Architecture (Hash Consistency)
+
+Holanc maintains **two parallel Merkle trees** over the same set of commitments, each using a different hash function. This is intentional and both roots are canonical within their respective contexts.
+
+### On-Chain: SHA-256
+
+The on-chain pool program (`holanc-pool`) builds an incremental SHA-256 Merkle tree during `deposit()`. SHA-256 is used because:
+
+- Solana provides a native `sol_sha256` syscall at low compute cost
+- Poseidon hashing on-chain is prohibitively expensive (~50K CU per hash vs ~200 CU for SHA-256)
+- The on-chain SHA-256 root serves as an **integrity anchor** — it is not used for ZK proof verification
+
+The SHA-256 root is validated in `update_root()` to ensure the caller's view of the tree is consistent with the on-chain state before accepting a new Poseidon root.
+
+### Off-Chain / Circuits: Poseidon
+
+The ZK circuits use Poseidon hash exclusively for Merkle inclusion proofs. Poseidon is a ZK-friendly hash — its algebraic structure over BN254's scalar field requires ~300 R1CS constraints per hash vs ~25,000 for SHA-256. The off-chain tree (in the Rust `holanc-tree` crate and TypeScript SDK) computes Poseidon roots, which are:
+
+- Submitted to the pool via `update_root()` (verified against SHA-256 root for integrity)
+- Used as public inputs in ZK proofs for inclusion verification
+- Stored in the pool's root history ring buffer
+
+### Cross-Chain Bridge: SHA-256
+
+Foreign epoch nullifier roots arrive via Wormhole VAA and are verified using SHA-256 Merkle proofs in `verify_foreign_nullifier()`. This matches the Wormhole ecosystem convention and does not interact with the Poseidon proof circuit.
+
+### Summary Table
+
+| Context | Hash | Rationale |
+|---------|------|-----------|
+| On-chain Merkle (deposit) | SHA-256 | Low CU cost; integrity anchor |
+| ZK circuits (proofs) | Poseidon | ZK-friendly (~300 R1CS constraints) |
+| Root history (pool state) | Poseidon | Verified by ZK proofs |
+| `update_root()` integrity check | SHA-256 | Ensures Poseidon root matches on-chain commits |
+| Cross-chain nullifier proofs | SHA-256 | Wormhole ecosystem compatibility |
+
+> **Invariant**: Every `update_root(poseidon_root, expected_sha256_root)` call verifies that `expected_sha256_root` matches the on-chain incrementally-computed SHA-256 root. This binds the two trees: any disagreement about which leaves exist causes `update_root` to fail.
+
 ## Variable I/O Circuits (4×4)
 
 The `transfer_4x4` and `withdraw_4x4` circuits generalize the 2-in-2-out design to support up to 4 inputs and 4 outputs. Boolean selectors (`has_input[i]`, `has_output[j]`) gate each slot — inactive slots contribute zero value via `effective_value = value * has_input`. This enables flexible transaction composition (e.g. 3-to-1 consolidation, 1-to-4 split) without requiring separate circuit variants.
