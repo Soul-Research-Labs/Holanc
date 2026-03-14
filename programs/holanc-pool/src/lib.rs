@@ -11,6 +11,14 @@ const VERIFIER_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
     0x13, 0x20, 0x07, 0xab, 0x3d, 0x64, 0x9a, 0x0b,
 ]);
 
+/// Bridge program ID — used to derive commitment lock PDAs.
+const BRIDGE_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+    0xf3, 0x8c, 0x6a, 0x91, 0x2b, 0x0d, 0x4e, 0x7a,
+    0x15, 0xd9, 0x63, 0xc0, 0xe8, 0x47, 0xb2, 0x53,
+    0xa6, 0x39, 0x71, 0x0c, 0xfd, 0x82, 0x5e, 0xb4,
+    0x19, 0x20, 0xca, 0x3d, 0x7f, 0x56, 0xa1, 0x08,
+]);
+
 /// Merkle tree depth for the commitment tree.
 pub const TREE_DEPTH: usize = 20;
 /// Number of historical roots to store (ring buffer).
@@ -162,6 +170,20 @@ pub mod holanc_pool {
             HolancPoolError::UnknownMerkleRoot
         );
 
+        // Reject if any input commitment is locked for bridge transfer.
+        // The bridge program creates a PDA at ["lock", pool, commitment];
+        // if that account exists and is_unlocked == false, the note is frozen.
+        assert_not_bridge_locked(
+            &ctx.accounts.commitment_lock_1,
+            &ctx.accounts.pool.key(),
+            &nullifiers[0],
+        )?;
+        assert_not_bridge_locked(
+            &ctx.accounts.commitment_lock_2,
+            &ctx.accounts.pool.key(),
+            &nullifiers[1],
+        )?;
+
         // Verify the ZK proof via CPI to holanc-verifier
         let mut public_inputs: Vec<[u8; 32]> = Vec::with_capacity(6);
         public_inputs.push(merkle_root);
@@ -269,6 +291,18 @@ pub mod holanc_pool {
             is_known_root(pool, &merkle_root),
             HolancPoolError::UnknownMerkleRoot
         );
+
+        // Reject if any input commitment is locked for bridge transfer.
+        assert_not_bridge_locked(
+            &ctx.accounts.commitment_lock_1,
+            &ctx.accounts.pool.key(),
+            &nullifiers[0],
+        )?;
+        assert_not_bridge_locked(
+            &ctx.accounts.commitment_lock_2,
+            &ctx.accounts.pool.key(),
+            &nullifiers[1],
+        )?;
 
         // Verify the ZK proof via CPI to holanc-verifier
         let mut public_inputs: Vec<[u8; 32]> = Vec::with_capacity(7);
@@ -444,6 +478,41 @@ fn zeros() -> &'static [[u8; 32]; TREE_DEPTH] {
     })
 }
 
+/// Reject if the account is an initialized bridge commitment lock PDA
+/// with `is_unlocked == false`. An empty (non-existent) account is fine.
+fn assert_not_bridge_locked(
+    lock_account: &AccountInfo,
+    pool_key: &Pubkey,
+    commitment: &[u8; 32],
+) -> Result<()> {
+    // If account has no data it was never created → not locked.
+    if lock_account.data_is_empty() {
+        return Ok(());
+    }
+
+    // Verify that the account is actually the expected PDA on the bridge program.
+    let (expected_pda, _) = Pubkey::find_program_address(
+        &[b"lock", pool_key.as_ref(), commitment],
+        &BRIDGE_PROGRAM_ID,
+    );
+    require!(
+        *lock_account.key == expected_pda,
+        HolancPoolError::InvalidCommitmentLockPDA
+    );
+
+    // The lock record has an 8-byte Anchor discriminator followed by the
+    // CommitmentLockRecord fields. `is_unlocked` is a bool at byte offset:
+    //   8 (disc) + 32 (pool) + 32 (commitment) + 8 (source_chain) + 8 (dest)
+    //   + 32 (locker) + 8 (locked_at) = 128
+    const IS_UNLOCKED_OFFSET: usize = 8 + 32 + 32 + 8 + 8 + 32 + 8;
+    let data = lock_account.try_borrow_data()?;
+    if data.len() > IS_UNLOCKED_OFFSET {
+        let is_unlocked = data[IS_UNLOCKED_OFFSET] != 0;
+        require!(is_unlocked, HolancPoolError::CommitmentBridgeLocked);
+    }
+    Ok(())
+}
+
 fn is_known_root(pool: &PoolState, root: &[u8; 32]) -> bool {
     if pool.current_root == *root {
         return true;
@@ -595,6 +664,15 @@ pub struct PrivateTransfer<'info> {
 
     pub authority: Signer<'info>,
 
+    /// Bridge commitment lock PDA for first nullifier's commitment.
+    /// If this account exists and is initialized, the commitment is frozen.
+    /// CHECK: Derived from bridge program seeds; validated in instruction logic.
+    pub commitment_lock_1: UncheckedAccount<'info>,
+
+    /// Bridge commitment lock PDA for second nullifier's commitment.
+    /// CHECK: Derived from bridge program seeds; validated in instruction logic.
+    pub commitment_lock_2: UncheckedAccount<'info>,
+
     pub token_program: Program<'info, Token>,
 }
 
@@ -629,6 +707,14 @@ pub struct Withdraw<'info> {
     pub verification_key: AccountInfo<'info>,
 
     pub authority: Signer<'info>,
+
+    /// Bridge commitment lock PDA for first nullifier's commitment.
+    /// CHECK: Derived from bridge program seeds; validated in instruction logic.
+    pub commitment_lock_1: UncheckedAccount<'info>,
+
+    /// Bridge commitment lock PDA for second nullifier's commitment.
+    /// CHECK: Derived from bridge program seeds; validated in instruction logic.
+    pub commitment_lock_2: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
 }
@@ -795,4 +881,8 @@ pub enum HolancPoolError {
     Unauthorized,
     #[msg("Proof verification failed")]
     ProofVerificationFailed,
+    #[msg("Commitment is locked for bridge transfer")]
+    CommitmentBridgeLocked,
+    #[msg("Invalid commitment lock PDA")]
+    InvalidCommitmentLockPDA,
 }
