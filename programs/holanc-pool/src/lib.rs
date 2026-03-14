@@ -65,6 +65,10 @@ pub mod holanc_pool {
         pool.is_paused = false;
         pool.epoch = 0;
 
+        // Pre-compute the SHA-256 zero hashes so the first deposit doesn't
+        // pay the extra CU cost of lazy initialization.
+        let _ = zeros();
+
         emit!(PoolInitialized {
             pool: pool_key,
             token_mint: ctx.accounts.token_mint.key(),
