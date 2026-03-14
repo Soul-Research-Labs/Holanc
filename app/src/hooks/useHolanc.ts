@@ -38,6 +38,17 @@ const POOL_PROGRAM_ID = new PublicKey(
 
 const MNEMONIC_KEY = "holanc_mnemonic";
 
+/** Extract a readable error message from an unknown thrown value. */
+function describeError(e: unknown, fallback: string): string {
+  if (e instanceof Error) {
+    if (e.message.includes("User rejected")) return "Transaction rejected by wallet";
+    if (e.message.includes("Insufficient")) return e.message;
+    return e.message || fallback;
+  }
+  if (typeof e === "string") return e;
+  return fallback;
+}
+
 /**
  * Hook that wraps interaction with the Holanc SDK.
  * Uses HolancWallet for note management, HolancProver for proof generation,
@@ -147,7 +158,7 @@ export function useHolanc() {
         setTxSignature(sig);
         setStatus("done");
       } catch (e: any) {
-        setError(e.message || "Deposit failed");
+        setError(describeError(e, "Deposit failed"));
         setStatus("error");
       }
     },
@@ -221,7 +232,7 @@ export function useHolanc() {
         setTxSignature(sig);
         setStatus("done");
       } catch (e: any) {
-        setError(e.message || "Transfer failed");
+        setError(describeError(e, "Transfer failed"));
         setStatus("error");
       }
     },
@@ -296,7 +307,7 @@ export function useHolanc() {
         setTxSignature(sig);
         setStatus("done");
       } catch (e: any) {
-        setError(e.message || "Withdrawal failed");
+        setError(describeError(e, "Withdrawal failed"));
         setStatus("error");
       }
     },
@@ -381,7 +392,7 @@ export function useHolanc() {
         setStatus("done");
         return result;
       } catch (e: any) {
-        setError(e.message || "Stealth send failed");
+        setError(describeError(e, "Stealth send failed"));
         setStatus("error");
         return null;
       }
@@ -444,7 +455,7 @@ export function useHolanc() {
       setStatus("done");
       return results;
     } catch (e: any) {
-      setError(e.message || "Stealth scan failed");
+      setError(describeError(e, "Stealth scan failed"));
       setStatus("error");
       return [];
     }
@@ -518,7 +529,7 @@ export function useHolanc() {
         setStatus("done");
         return sig;
       } catch (e: any) {
-        setError(e.message || "Bridge transfer failed");
+        setError(describeError(e, "Bridge transfer failed"));
         setStatus("error");
         return null;
       }
@@ -598,7 +609,7 @@ export function useHolanc() {
         setStatus("done");
         return sig;
       } catch (e: any) {
-        setError(e.message || "Disclosure failed");
+        setError(describeError(e, "Disclosure failed"));
         setStatus("error");
         return null;
       }
@@ -682,7 +693,7 @@ export function useHolanc() {
         setStatus("done");
         return sig;
       } catch (e: any) {
-        setError(e.message || "Wealth proof failed");
+        setError(describeError(e, "Wealth proof failed"));
         setStatus("error");
         return null;
       }

@@ -21,7 +21,7 @@ export function ProofStatus({ status, message }: ProofStatusProps) {
   const labels = {
     generating: "Generating ZK proof…",
     done: "Proof ready",
-    error: "Proof generation failed",
+    error: "Operation failed",
   };
 
   return (

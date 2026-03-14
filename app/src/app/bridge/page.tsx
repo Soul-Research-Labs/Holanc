@@ -107,7 +107,7 @@ export default function BridgePage() {
                 ? "error"
                 : "idle"
             }
-            message={isBusy ? "Processing bridge transfer…" : undefined}
+            message={isBusy ? "Processing bridge transfer…" : holanc.error || undefined}
           />
 
           {holanc.status === "done" && (
