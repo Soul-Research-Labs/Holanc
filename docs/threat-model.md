@@ -124,6 +124,40 @@ Each input note must have a valid Merkle path to one of the 100 recent historica
 5. **Fixed circuit sizes**: Transfer circuits support exactly 2 inputs and 2 outputs. Variable-size circuits are planned for Phase 2.
 6. **BN254 security margin**: ~100-bit security, below the modern 128-bit standard.
 
+## Dual-Hash Merkle Architecture
+
+Holanc uses two parallel Merkle trees over the same set of commitments:
+
+| Property    | On-chain tree       | Circuit tree        |
+| ----------- | ------------------- | ------------------- |
+| Hash        | SHA-256             | Poseidon            |
+| Purpose     | Cheap root tracking | ZK-friendly proofs  |
+| CU cost     | ~100 CU (syscall)   | ~6k constraints     |
+| Updated by  | Pool program        | Client / relayer    |
+
+### Invariant
+
+For every leaf index _i_, the SHA-256 tree and the Poseidon tree contain the **same** commitment bytes. The on-chain program stores only the SHA-256 root; the Poseidon root is a public input inside the ZK proof.
+
+### Threat Analysis
+
+| Scenario | Impact | Detection | Mitigation |
+| --- | --- | --- | --- |
+| Client computes wrong Poseidon path | Proof verification fails (invalid root) | Immediate: groth16 verify rejects | None needed — soundness enforced by verifier |
+| Relayer submits stale Poseidon root | Proof passes but root not in `root_history` ring buffer | Immediate: `update_root` checks SHA-256 root freshness | Pool rejects if SHA-256 root mismatch |
+| Indexer misses a commitment event | Client builds Poseidon tree with wrong leaves → root mismatch | On next proof attempt | Re-scan from last confirmed checkpoint (crash-safe scanner) |
+| SHA-256 tree diverges from Poseidon tree | Funds locked — valid Poseidon proof rejected by SHA-256 check | Monitoring: compare local Poseidon root with on-chain SHA-256 root | Emergency admin `pause`; off-chain tree resync |
+| Malicious program upgrade changes SHA-256 logic | Tree corruption | Governance / multisig review | Anchor upgrade authority; immutable after audit |
+
+### Why Two Trees?
+
+A single-hash approach would require either:
+
+- **Poseidon on-chain**: ~6k constraints per hash → ~120k CU per 20-level insert. Exceeds Solana's 200k CU budget for complex transactions.
+- **SHA-256 in circuit**: ~25k constraints per hash → ~500k constraints per 20-level Merkle path. Proof generation time ~30s+ and verification cost prohibitive.
+
+The dual-tree design keeps on-chain operations cheap (SHA-256 syscall) while ZK proofs remain efficient (Poseidon). The trade-off is implementation complexity and the requirement that both trees stay in sync — enforced by the invariant above.
+
 ## Compliance Considerations
 
 The viewing key mechanism enables selective disclosure:
