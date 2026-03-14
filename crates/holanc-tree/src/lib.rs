@@ -163,6 +163,36 @@ impl MerkleTree {
             root: self.root,
         })
     }
+
+    /// Serialize the tree state to a snapshot (for persistence / checkpointing).
+    ///
+    /// Stores only the leaves and depth — the filled_subtrees, zeros, and root
+    /// are recomputed on restore to avoid serializing derived data.
+    pub fn snapshot(&self) -> TreeSnapshot {
+        TreeSnapshot {
+            depth: self.depth,
+            leaves: self.leaves.clone(),
+        }
+    }
+
+    /// Restore a tree from a previously saved snapshot.
+    ///
+    /// Recomputes all intermediate state (filled_subtrees, root) by replaying
+    /// all leaf appends. O(n·depth) where n is the number of leaves.
+    pub fn from_snapshot(snapshot: TreeSnapshot) -> Result<Self, TreeError> {
+        let mut tree = Self::new(snapshot.depth);
+        for leaf in snapshot.leaves {
+            tree.append(leaf)?;
+        }
+        Ok(tree)
+    }
+}
+
+/// Serializable tree checkpoint for persistence.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TreeSnapshot {
+    pub depth: usize,
+    pub leaves: Vec<[u8; 32]>,
 }
 
 /// A Merkle inclusion proof.
