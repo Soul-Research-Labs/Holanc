@@ -87,9 +87,9 @@ export class HolancWallet {
       .reduce((sum, n) => sum + n.value, 0n);
   }
 
-  /** Get unspent notes. */
+  /** Get unspent notes (excludes spent and pending-locked notes). */
   unspentNotes(): Note[] {
-    return this.notes.filter((n) => !n.spent);
+    return this.notes.filter((n) => !n.spent && !n.pending);
   }
 
   /** Transaction history. */
@@ -138,23 +138,33 @@ export class HolancWallet {
     ]);
   }
 
-  /** Select notes covering an amount. Greedy largest-first, max 2 inputs. */
+  /**
+   * Select notes covering an amount.
+   *
+   * Uses randomized selection among qualifying candidates to prevent
+   * fingerprinting via deterministic UTXO selection patterns.
+   */
   selectNotes(amount: bigint): Note[] {
-    const unspent = this.unspentNotes().sort((a, b) =>
-      a.value > b.value ? -1 : a.value < b.value ? 1 : 0,
-    );
+    const unspent = this.unspentNotes();
 
-    // Try single note first
-    const single = unspent.find((n) => n.value >= amount);
-    if (single) return [single];
+    // Collect all single-note candidates
+    const singles = unspent.filter((n) => n.value >= amount);
+    if (singles.length > 0) {
+      return [singles[cryptoRandomIndex(singles.length)]];
+    }
 
-    // Try two notes
+    // Collect all valid pairs
+    const pairs: [Note, Note][] = [];
     for (let i = 0; i < unspent.length; i++) {
       for (let j = i + 1; j < unspent.length; j++) {
         if (unspent[i].value + unspent[j].value >= amount) {
-          return [unspent[i], unspent[j]];
+          pairs.push([unspent[i], unspent[j]]);
         }
       }
+    }
+    if (pairs.length > 0) {
+      const [a, b] = pairs[cryptoRandomIndex(pairs.length)];
+      return [a, b];
     }
 
     throw new Error(
@@ -170,6 +180,10 @@ export class HolancWallet {
   ): Promise<{ inputNotes: Note[]; outputNotes: Note[] }> {
     const total = amount + fee;
     const inputNotes = this.selectNotes(total);
+
+    // Lock selected notes to prevent concurrent use in another transaction
+    for (const n of inputNotes) n.pending = true;
+
     const inputSum = inputNotes.reduce((s, n) => s + n.value, 0n);
     const change = inputSum - total;
 
@@ -213,6 +227,10 @@ export class HolancWallet {
   ): Promise<{ inputNotes: Note[]; outputNotes: Note[] }> {
     const total = amount + fee;
     const inputNotes = this.selectNotes(total);
+
+    // Lock selected notes to prevent concurrent use
+    for (const n of inputNotes) n.pending = true;
+
     const inputSum = inputNotes.reduce((s, n) => s + n.value, 0n);
     const change = inputSum - total;
 
@@ -238,12 +256,23 @@ export class HolancWallet {
     return { inputNotes, outputNotes };
   }
 
-  /** Mark notes as spent. */
+  /** Mark notes as spent and clear pending lock. */
   markSpent(notes: Note[]): void {
     const commitments = new Set(notes.map((n) => n.commitment));
     for (const note of this.notes) {
       if (commitments.has(note.commitment)) {
         note.spent = true;
+        note.pending = false;
+      }
+    }
+  }
+
+  /** Unlock pending notes (e.g. after a failed transaction). */
+  unlockNotes(notes: Note[]): void {
+    const commitments = new Set(notes.map((n) => n.commitment));
+    for (const note of this.notes) {
+      if (commitments.has(note.commitment)) {
+        note.pending = false;
       }
     }
   }
@@ -252,4 +281,11 @@ export class HolancWallet {
     const idx = this.nextBlinding++;
     return poseidonHashHex([hexToField(this.spendingKeyHex()), BigInt(idx)]);
   }
+}
+
+/** Cryptographically random index in [0, max). */
+function cryptoRandomIndex(max: number): number {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0] % max;
 }

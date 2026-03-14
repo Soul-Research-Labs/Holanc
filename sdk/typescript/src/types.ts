@@ -13,6 +13,8 @@ export interface Note {
   nullifier: Hash32;
   leafIndex?: number;
   spent: boolean;
+  /** True while the note is locked for an in-flight transaction. */
+  pending?: boolean;
 }
 
 /** Result of a deposit operation. */
