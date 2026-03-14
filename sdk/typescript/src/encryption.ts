@@ -8,21 +8,39 @@ import { poseidonHash, fieldToHex, hexToField } from "./poseidon";
  * to a recipient so they can detect and spend incoming notes.
  *
  * Encryption scheme:
- *   1. Derive shared secret via ECDH (placeholder: hash-based KDF).
+ *   1. Derive shared secret via BabyJubJub ECDH.
  *   2. Derive AES key from shared secret using HKDF-SHA256.
  *   3. Encrypt plaintext with AES-256-GCM (random 12-byte IV).
  *   4. Output: IV || ciphertext || tag (12 + len + 16 bytes).
- *
- * In production, the ECDH will use BabyJubJub on BN254 to match
- * the in-circuit key derivation.
  */
+
+// Lazy-loaded BabyJubJub instance (shared with stealth.ts)
+let _babyjub: any = null;
+let _poseidon: any = null;
+
+async function getBabyjub() {
+  if (!_babyjub) {
+    const circomlibjs = await import("circomlibjs");
+    _babyjub = await circomlibjs.buildBabyjub();
+  }
+  return _babyjub;
+}
+
+async function getPoseidon() {
+  if (!_poseidon) {
+    const circomlibjs = await import("circomlibjs");
+    _poseidon = await circomlibjs.buildPoseidon();
+  }
+  return _poseidon;
+}
 
 const HKDF_INFO = new TextEncoder().encode("holanc-note-v1");
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
 export interface EncryptedNote {
-  ephemeralPubKey: Hash32;
+  /** Ephemeral public key — BabyJubJub point [x, y] as hex strings. */
+  ephemeralPubKey: [Hash32, Hash32];
   ciphertext: Uint8Array;
 }
 
@@ -33,20 +51,46 @@ export interface NotePlaintext {
 }
 
 /**
- * Encrypt a note for a recipient.
+ * Encrypt a note for a recipient using BabyJubJub ECDH.
  *
- * @param plaintext   The note fields to encrypt.
- * @param senderKey   Sender's secret key (32 bytes hex).
- * @param recipientPub Recipient's public key (32 bytes hex).
- * @returns Encrypted note bundle.
+ * @param plaintext     The note fields to encrypt.
+ * @param recipientPub  Recipient's BabyJubJub public key [x, y] hex strings.
+ * @returns Encrypted note bundle with ephemeral pubkey for ECDH recovery.
  */
 export async function encryptNote(
   plaintext: NotePlaintext,
-  senderKey: Hash32,
-  recipientPub: Hash32,
+  recipientPub: [Hash32, Hash32],
 ): Promise<EncryptedNote> {
-  // Derive shared secret (placeholder: hash-based, will be BabyJubJub ECDH)
-  const sharedSecret = await deriveSharedSecret(senderKey, recipientPub);
+  const babyjub = await getBabyjub();
+  const poseidon = await getPoseidon();
+  const F = babyjub.F;
+
+  // Generate ephemeral scalar
+  const ephBytes = crypto.getRandomValues(new Uint8Array(32));
+  const ephScalar = BigInt("0x" + bytesToHex(ephBytes)) % babyjub.subOrder;
+  if (ephScalar === 0n) {
+    // Reject zero scalar — re-derive
+    return encryptNote(plaintext, recipientPub);
+  }
+
+  // R = ephScalar * G (ephemeral pubkey)
+  const R = babyjub.mulPointEscalar(babyjub.Base8, ephScalar);
+  const ephemeralPubKey: [Hash32, Hash32] = [
+    F.toObject(R[0]).toString(16).padStart(64, "0"),
+    F.toObject(R[1]).toString(16).padStart(64, "0"),
+  ];
+
+  // ECDH: shared_point = ephScalar * recipientPub
+  const recipPoint = [
+    F.e(BigInt("0x" + recipientPub[0])),
+    F.e(BigInt("0x" + recipientPub[1])),
+  ];
+  const sharedPoint = babyjub.mulPointEscalar(recipPoint, ephScalar);
+
+  // shared_secret = Poseidon(shared_point.x, shared_point.y)
+  const ssHash = poseidon([sharedPoint[0], sharedPoint[1]]);
+  const ssHex = F.toObject(ssHash).toString(16).padStart(64, "0");
+  const sharedSecret = hexToBytes32(ssHex);
 
   // Derive AES key via HKDF
   const aesKey = await hkdfDeriveKey(sharedSecret);
@@ -75,18 +119,14 @@ export async function encryptNote(
   ciphertext.set(iv, 0);
   ciphertext.set(new Uint8Array(encrypted), IV_LENGTH);
 
-  // Ephemeral public key derived via Poseidon(senderKey)
-  const ephemeralField = await poseidonHash([hexToField(senderKey)]);
-  const ephemeralPubKey = fieldToHex(ephemeralField);
-
   return { ephemeralPubKey, ciphertext };
 }
 
 /**
- * Decrypt a note using the recipient's secret key.
+ * Decrypt a note using the recipient's BabyJubJub secret key.
  *
- * @param encrypted    The encrypted note bundle.
- * @param recipientKey Recipient's secret key (32 bytes hex).
+ * @param encrypted    The encrypted note bundle (includes ephemeral pubkey).
+ * @param recipientKey Recipient's BabyJubJub secret scalar (hex).
  * @returns Decrypted note plaintext, or null if decryption fails (not for us).
  */
 export async function decryptNote(
@@ -94,10 +134,26 @@ export async function decryptNote(
   recipientKey: Hash32,
 ): Promise<NotePlaintext | null> {
   try {
-    const sharedSecret = await deriveSharedSecret(
-      recipientKey,
-      encrypted.ephemeralPubKey,
-    );
+    const babyjub = await getBabyjub();
+    const poseidon = await getPoseidon();
+    const F = babyjub.F;
+
+    const viewingScalar = BigInt("0x" + recipientKey) % babyjub.subOrder;
+
+    // Parse ephemeral pubkey
+    const ephPoint = [
+      F.e(BigInt("0x" + encrypted.ephemeralPubKey[0])),
+      F.e(BigInt("0x" + encrypted.ephemeralPubKey[1])),
+    ];
+
+    // ECDH: shared_point = viewingKey * R (== ephScalar * viewingPub)
+    const sharedPoint = babyjub.mulPointEscalar(ephPoint, viewingScalar);
+
+    // shared_secret = Poseidon(shared_point.x, shared_point.y)
+    const ssHash = poseidon([sharedPoint[0], sharedPoint[1]]);
+    const ssHex = F.toObject(ssHash).toString(16).padStart(64, "0");
+    const sharedSecret = hexToBytes32(ssHex);
+
     const aesKey = await hkdfDeriveKey(sharedSecret);
 
     const iv = encrypted.ciphertext.slice(0, IV_LENGTH);
@@ -144,16 +200,8 @@ export async function scanNotes(
 // Internal helpers
 // ------------------------------------------------------------------
 
-/** Shared secret derivation via Poseidon(secretKey, publicKey). */
-async function deriveSharedSecret(
-  secretKey: Hash32,
-  publicKey: Hash32,
-): Promise<Uint8Array> {
-  const result = await poseidonHash([
-    hexToField(secretKey),
-    hexToField(publicKey),
-  ]);
-  const hex = fieldToHex(result);
+/** Convert a 64-char hex string to a 32-byte Uint8Array. */
+function hexToBytes32(hex: string): Uint8Array {
   const bytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
