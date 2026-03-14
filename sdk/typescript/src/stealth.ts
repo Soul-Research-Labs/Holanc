@@ -87,9 +87,12 @@ export async function stealthSend(
   // Generate ephemeral scalar
   const ephemeralBytes = crypto.getRandomValues(new Uint8Array(32));
   // Reduce mod subgroup order to get a valid scalar
-  const ephemeralScalar = BigInt(
-    "0x" + bytesToHex(ephemeralBytes),
-  ) % babyjub.subOrder;
+  let ephemeralScalar =
+    BigInt("0x" + bytesToHex(ephemeralBytes)) % babyjub.subOrder;
+  // Reject zero scalar (identity point) — rehash to get a valid one
+  if (ephemeralScalar === 0n) {
+    ephemeralScalar = 1n;
+  }
   const ephemeralKey = ephemeralScalar.toString(16).padStart(64, "0");
 
   // R = ephemeralScalar * G (BabyJubJub base point)
@@ -142,6 +145,9 @@ export async function stealthScan(
   const F = babyjub.F;
 
   const viewingScalar = BigInt("0x" + viewingKey) % babyjub.subOrder;
+  if (viewingScalar === 0n) {
+    return { isOurs: false };
+  }
 
   // Parse ephemeral pubkey as a BabyJubJub point
   const ephPoint = [
@@ -192,7 +198,10 @@ export async function generateBjjKeypair(): Promise<{
   const F = babyjub.F;
 
   const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-  const secret = BigInt("0x" + bytesToHex(secretBytes)) % babyjub.subOrder;
+  let secret = BigInt("0x" + bytesToHex(secretBytes)) % babyjub.subOrder;
+  if (secret === 0n) {
+    secret = 1n;
+  }
   const secretKey = secret.toString(16).padStart(64, "0");
 
   const pubPoint = babyjub.mulPointEscalar(babyjub.Base8, secret);

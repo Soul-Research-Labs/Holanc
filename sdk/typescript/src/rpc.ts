@@ -44,6 +44,7 @@ export class FailoverConnection {
   private endpoints: EndpointState[];
   private maxFailures: number;
   private cooldownMs: number;
+  private timeoutMs: number;
 
   constructor(
     endpoints: (string | RpcEndpointConfig)[],
@@ -56,10 +57,11 @@ export class FailoverConnection {
     const commitment = config.commitment ?? "confirmed";
     this.maxFailures = config.maxFailures ?? DEFAULT_MAX_FAILURES;
     this.cooldownMs = config.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+    this.timeoutMs = config.timeoutMs ?? 0;
 
     this.endpoints = endpoints.map((ep) => {
       const url = typeof ep === "string" ? ep : ep.url;
-      const weight = typeof ep === "string" ? 1 : (ep.weight ?? 1);
+      const weight = typeof ep === "string" ? 1 : ep.weight ?? 1;
       return {
         url,
         weight,
@@ -93,7 +95,9 @@ export class FailoverConnection {
     let lastError: Error | undefined;
     for (const ep of candidates) {
       try {
-        const result = await fn(ep.connection);
+        const result = this.timeoutMs > 0
+          ? await withTimeout(fn(ep.connection), this.timeoutMs)
+          : await fn(ep.connection);
         // Success: reset failures
         ep.failures = 0;
         ep.openUntil = 0;
@@ -144,4 +148,15 @@ export class FailoverConnection {
       openUntil: e.openUntil,
     }));
   }
+}
+
+/** Race a promise against a timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`RPC timeout after ${ms}ms`)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }

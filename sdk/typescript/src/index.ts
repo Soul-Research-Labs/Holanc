@@ -3,7 +3,7 @@ export { HolancWallet } from "./wallet";
 export { HolancProver } from "./prover";
 export type { Transfer4x4ProveParams, Withdraw4x4ProveParams } from "./prover";
 export { encryptNote, decryptNote } from "./encryption";
-export { stealthSend, stealthScan, deriveStealthSpendingKey } from "./stealth";
+export { stealthSend, stealthScan, deriveStealthSpendingKey, generateBjjKeypair } from "./stealth";
 export type {
   StealthMetaAddress,
   StealthSendResult,

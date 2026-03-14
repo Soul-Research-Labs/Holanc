@@ -198,10 +198,13 @@ pub struct InitializeNullifierManager<'info> {
 
 #[derive(Accounts)]
 pub struct RegisterNullifier<'info> {
-    #[account(mut)]
+    #[account(mut, has_one = authority)]
     pub manager: Account<'info, NullifierManager>,
 
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = nullifier_page.pool == manager.pool @ HolancNullifierError::NullifierPagePoolMismatch,
+    )]
     pub nullifier_page: Account<'info, NullifierPage>,
 
     pub authority: Signer<'info>,
@@ -323,4 +326,6 @@ pub enum HolancNullifierError {
     NullifierAlreadySpent,
     #[msg("Unauthorized")]
     Unauthorized,
+    #[msg("Nullifier page does not belong to the expected pool")]
+    NullifierPagePoolMismatch,
 }
