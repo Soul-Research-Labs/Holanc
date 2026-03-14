@@ -1,7 +1,18 @@
 //! Holanc CLI — Interactive REPL for the privacy protocol.
 
 use holanc_client::Wallet;
+use holanc_prover::{HolancProver, TransferParams, WithdrawParams, Groth16Proof};
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+
+/// Holds the last generated proof for submission.
+static mut LAST_PROOF: Option<Groth16Proof> = None;
+
+fn circuit_dir() -> PathBuf {
+    std::env::var("HOLANC_CIRCUIT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./circuits"))
+}
 
 fn main() {
     println!("╔══════════════════════════════════════════╗");
@@ -11,7 +22,9 @@ fn main() {
     println!();
     println!("Initializing Holanc wallet...");
     let mut wallet = Wallet::random();
+    let prover = HolancProver::new(circuit_dir());
     println!("Ready. Wallet owner: {}", hex::encode(&wallet.owner()[..8]));
+    println!("Circuit dir: {}", circuit_dir().display());
     println!("Type 'help' for commands.\n");
 
     let stdin = io::stdin();
@@ -35,6 +48,9 @@ fn main() {
             "deposit" | "d" => cmd_deposit(&mut wallet, &parts),
             "transfer" | "t" => cmd_transfer(&mut wallet, &parts),
             "withdraw" | "w" => cmd_withdraw(&mut wallet, &parts),
+            "prove-transfer" | "pt" => cmd_prove_transfer(&wallet, &prover, &parts),
+            "prove-withdraw" | "pw" => cmd_prove_withdraw(&wallet, &prover, &parts),
+            "submit" => cmd_submit(),
 
             "balance" | "bal" => cmd_balance(&wallet),
             "notes" | "n" => cmd_notes(&wallet),
@@ -181,6 +197,114 @@ fn cmd_withdraw(wallet: &mut Wallet, parts: &[&str]) {
             wallet.mark_spent(&indices);
         }
         Err(e) => println!("  ✗ Withdrawal failed: {}", e),
+    }
+}
+
+fn cmd_prove_transfer(wallet: &Wallet, prover: &HolancProver, parts: &[&str]) {
+    if parts.len() < 3 {
+        println!("Usage: prove-transfer <recipient_hex> <amount> [fee]");
+        return;
+    }
+    let mut recipient = [0u8; 32];
+    match hex::decode(parts[1]) {
+        Ok(bytes) if bytes.len() == 32 => recipient.copy_from_slice(&bytes),
+        _ => { println!("Invalid recipient hex."); return; }
+    }
+    let amount: u64 = match parts[2].parse() {
+        Ok(a) if a > 0 => a,
+        _ => { println!("Invalid amount."); return; }
+    };
+    let fee: u64 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    let prepared = match wallet.prepare_transfer(recipient, amount, fee) {
+        Ok(p) => p,
+        Err(e) => { println!("  ✗ Prepare failed: {}", e); return; }
+    };
+
+    println!("  Generating Groth16 proof for transfer…");
+    let params = TransferParams {
+        spending_key: *wallet.owner(),
+        input_notes: prepared.input_notes,
+        input_proofs: prepared.input_proofs,
+        output_notes: prepared.output_notes,
+        fee,
+    };
+    match prover.prove_transfer(&params) {
+        Ok(proof) => {
+            println!("  ✓ Proof generated!");
+            println!("    Public signals: {}", proof.public_signals.len());
+            println!("    π_A: {} elements", proof.pi_a.len());
+            println!("    → Use 'submit' to send via relayer.");
+            // SAFETY: single-threaded CLI, only main thread accesses this
+            unsafe { LAST_PROOF = Some(proof); }
+        }
+        Err(e) => println!("  ✗ Proof generation failed: {}", e),
+    }
+}
+
+fn cmd_prove_withdraw(wallet: &Wallet, prover: &HolancProver, parts: &[&str]) {
+    if parts.len() < 2 {
+        println!("Usage: prove-withdraw <amount> [fee]");
+        return;
+    }
+    let amount: u64 = match parts[1].parse() {
+        Ok(a) if a > 0 => a,
+        _ => { println!("Invalid amount."); return; }
+    };
+    let fee: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    let prepared = match wallet.prepare_withdraw(amount, fee) {
+        Ok(p) => p,
+        Err(e) => { println!("  ✗ Prepare failed: {}", e); return; }
+    };
+
+    println!("  Generating Groth16 proof for withdrawal…");
+    let params = WithdrawParams {
+        spending_key: *wallet.owner(),
+        input_notes: prepared.input_notes,
+        input_proofs: prepared.input_proofs,
+        output_notes: prepared.output_notes,
+        exit_value: prepared.exit_value,
+        fee,
+    };
+    match prover.prove_withdraw(&params) {
+        Ok(proof) => {
+            println!("  ✓ Proof generated!");
+            println!("    Public signals: {}", proof.public_signals.len());
+            println!("    Exit value: {}", amount);
+            println!("    → Use 'submit' to send via relayer.");
+            // SAFETY: single-threaded CLI, only main thread accesses this
+            unsafe { LAST_PROOF = Some(proof); }
+        }
+        Err(e) => println!("  ✗ Proof generation failed: {}", e),
+    }
+}
+
+fn cmd_submit() {
+    let proof = unsafe { LAST_PROOF.as_ref() };
+    match proof {
+        None => {
+            println!("  No proof ready. Run 'prove-transfer' or 'prove-withdraw' first.");
+        }
+        Some(p) => {
+            let relayer_url = std::env::var("RELAYER_URL")
+                .unwrap_or_else(|_| "http://localhost:3001".into());
+            let payload = serde_json::json!({
+                "proof": {
+                    "pi_a": p.pi_a,
+                    "pi_b": p.pi_b,
+                    "pi_c": p.pi_c,
+                },
+                "publicSignals": p.public_signals,
+            });
+            println!("  Submitting to relayer at {}…", relayer_url);
+            println!("  Payload size: {} bytes", serde_json::to_vec(&payload).unwrap_or_default().len());
+            println!("  ⚠ HTTP submission requires an async runtime (not included in MVP CLI).");
+            println!("  Export payload with: echo '{}' | curl -X POST {}/relay -H 'Content-Type: application/json' -d @-",
+                serde_json::to_string(&payload).unwrap_or_default(),
+                relayer_url,
+            );
+        }
     }
 }
 
@@ -353,6 +477,11 @@ fn print_help() {
     println!("│   deposit <amount>              — Deposit into pool     │");
     println!("│   transfer <recipient> <amount> — Prepare transfer      │");
     println!("│   withdraw <amount> [fee]       — Prepare withdrawal    │");
+    println!("│                                                         │");
+    println!("│ Proving & Submission                                    │");
+    println!("│   prove-transfer / pt <recip> <amt> — Generate proof   │");
+    println!("│   prove-withdraw / pw <amt> [fee]   — Generate proof   │");
+    println!("│   submit                            — Submit to relayer│");
     println!("│                                                         │");
     println!("│ Wallet Info                                             │");
     println!("│   balance / bal     — Show wallet balance               │");

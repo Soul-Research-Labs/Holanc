@@ -14,5 +14,6 @@ holanc-primitives = { path = "../holanc-primitives" }
 holanc-note = { path = "../holanc-note" }
 holanc-tree = { path = "../holanc-tree" }
 holanc-client = { path = "../holanc-client" }
+holanc-prover = { path = "../holanc-prover" }
 serde_json = { workspace = true }
 hex = { workspace = true }
