@@ -90,14 +90,20 @@ export class RelayQueue {
   /**
    * Flush the current queue: send all queued transactions.
    *
-   * If the batch is smaller than minBatchSize, we pad with dummy no-op
-   * transactions to achieve k-anonymity within each batch window.
+   * The batch is always padded to the next multiple of minBatchSize with
+   * dummy no-op transactions. This ensures every flush window submits a
+   * fixed-size batch, preventing batch-size fingerprinting.
    */
   private async flush(): Promise<void> {
     if (this.queue.length === 0) return;
 
     const batch = this.queue.splice(0);
-    const paddingCount = Math.max(0, this.minBatchSize - batch.length);
+
+    // Always pad to the next multiple of minBatchSize so every flush
+    // window has an indistinguishable total transaction count.
+    const target =
+      Math.ceil(batch.length / this.minBatchSize) * this.minBatchSize;
+    const paddingCount = target - batch.length;
 
     if (paddingCount > 0) {
       console.log(
