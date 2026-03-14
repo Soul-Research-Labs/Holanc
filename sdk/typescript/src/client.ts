@@ -226,25 +226,37 @@ export class HolancClient {
 
     // Derive bridge commitment lock PDAs for each nullifier (may not exist)
     const [lockPda1] = PublicKey.findProgramAddressSync(
-      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[0], "hex")],
+      [
+        Buffer.from("lock"),
+        poolPda.toBuffer(),
+        Buffer.from(nullifiers[0], "hex"),
+      ],
       BRIDGE_PROGRAM_ID,
     );
     const [lockPda2] = PublicKey.findProgramAddressSync(
-      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[1], "hex")],
+      [
+        Buffer.from("lock"),
+        poolPda.toBuffer(),
+        Buffer.from(nullifiers[1], "hex"),
+      ],
       BRIDGE_PROGRAM_ID,
     );
 
     // Derive nullifier manager PDA if not provided
-    const nullMgr = nullifierManager ?? PublicKey.findProgramAddressSync(
-      [Buffer.from("nullifier_mgr"), poolPda.toBuffer()],
-      NULLIFIER_PROGRAM_ID,
-    )[0];
+    const nullMgr =
+      nullifierManager ??
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("nullifier_mgr"), poolPda.toBuffer()],
+        NULLIFIER_PROGRAM_ID,
+      )[0];
 
     // Nullifier page — caller should provide; default to page 0
-    const nullPage = nullifierPage ?? PublicKey.findProgramAddressSync(
-      [Buffer.from("nullifier_page"), poolPda.toBuffer(), Buffer.alloc(8)],
-      NULLIFIER_PROGRAM_ID,
-    )[0];
+    const nullPage =
+      nullifierPage ??
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("nullifier_page"), poolPda.toBuffer(), Buffer.alloc(8)],
+        NULLIFIER_PROGRAM_ID,
+      )[0];
 
     const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: 400_000,
@@ -263,9 +275,17 @@ export class HolancClient {
         { pubkey: poolPda, isSigner: false, isWritable: true },
         { pubkey: vaultPda, isSigner: false, isWritable: true },
         { pubkey: vaultAuthPda, isSigner: false, isWritable: false },
-        { pubkey: feeCollector ?? this.payer.publicKey, isSigner: false, isWritable: true },
+        {
+          pubkey: feeCollector ?? this.payer.publicKey,
+          isSigner: false,
+          isWritable: true,
+        },
         { pubkey: VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
-        { pubkey: verificationKey ?? PublicKey.default, isSigner: false, isWritable: false },
+        {
+          pubkey: verificationKey ?? PublicKey.default,
+          isSigner: false,
+          isWritable: false,
+        },
         { pubkey: NULLIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
         { pubkey: nullMgr, isSigner: false, isWritable: true },
         { pubkey: nullPage, isSigner: false, isWritable: true },
@@ -338,23 +358,35 @@ export class HolancClient {
 
     // Bridge commitment lock PDAs
     const [lockPda1] = PublicKey.findProgramAddressSync(
-      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[0], "hex")],
+      [
+        Buffer.from("lock"),
+        poolPda.toBuffer(),
+        Buffer.from(nullifiers[0], "hex"),
+      ],
       BRIDGE_PROGRAM_ID,
     );
     const [lockPda2] = PublicKey.findProgramAddressSync(
-      [Buffer.from("lock"), poolPda.toBuffer(), Buffer.from(nullifiers[1], "hex")],
+      [
+        Buffer.from("lock"),
+        poolPda.toBuffer(),
+        Buffer.from(nullifiers[1], "hex"),
+      ],
       BRIDGE_PROGRAM_ID,
     );
 
-    const nullMgr = nullifierManager ?? PublicKey.findProgramAddressSync(
-      [Buffer.from("nullifier_mgr"), poolPda.toBuffer()],
-      NULLIFIER_PROGRAM_ID,
-    )[0];
+    const nullMgr =
+      nullifierManager ??
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("nullifier_mgr"), poolPda.toBuffer()],
+        NULLIFIER_PROGRAM_ID,
+      )[0];
 
-    const nullPage = nullifierPage ?? PublicKey.findProgramAddressSync(
-      [Buffer.from("nullifier_page"), poolPda.toBuffer(), Buffer.alloc(8)],
-      NULLIFIER_PROGRAM_ID,
-    )[0];
+    const nullPage =
+      nullifierPage ??
+      PublicKey.findProgramAddressSync(
+        [Buffer.from("nullifier_page"), poolPda.toBuffer(), Buffer.alloc(8)],
+        NULLIFIER_PROGRAM_ID,
+      )[0];
 
     const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: 400_000,
@@ -374,9 +406,17 @@ export class HolancClient {
         { pubkey: vaultPda, isSigner: false, isWritable: true },
         { pubkey: vaultAuthPda, isSigner: false, isWritable: false },
         { pubkey: recipientTokenAccount, isSigner: false, isWritable: true },
-        { pubkey: feeCollector ?? this.payer.publicKey, isSigner: false, isWritable: true },
+        {
+          pubkey: feeCollector ?? this.payer.publicKey,
+          isSigner: false,
+          isWritable: true,
+        },
         { pubkey: VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
-        { pubkey: verificationKey ?? PublicKey.default, isSigner: false, isWritable: false },
+        {
+          pubkey: verificationKey ?? PublicKey.default,
+          isSigner: false,
+          isWritable: false,
+        },
         { pubkey: NULLIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
         { pubkey: nullMgr, isSigner: false, isWritable: true },
         { pubkey: nullPage, isSigner: false, isWritable: true },

@@ -95,9 +95,10 @@ export class FailoverConnection {
     let lastError: Error | undefined;
     for (const ep of candidates) {
       try {
-        const result = this.timeoutMs > 0
-          ? await withTimeout(fn(ep.connection), this.timeoutMs)
-          : await fn(ep.connection);
+        const result =
+          this.timeoutMs > 0
+            ? await withTimeout(fn(ep.connection), this.timeoutMs)
+            : await fn(ep.connection);
         // Success: reset failures
         ep.failures = 0;
         ep.openUntil = 0;
@@ -153,10 +154,19 @@ export class FailoverConnection {
 /** Race a promise against a timeout. */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`RPC timeout after ${ms}ms`)), ms);
+    const timer = setTimeout(
+      () => reject(new Error(`RPC timeout after ${ms}ms`)),
+      ms,
+    );
     promise.then(
-      (val) => { clearTimeout(timer); resolve(val); },
-      (err) => { clearTimeout(timer); reject(err); },
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
     );
   });
 }
