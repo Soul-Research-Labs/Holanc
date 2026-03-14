@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Off-chain encrypted note indexer for Holanc privacy protocol",
-  "main": "dist/scanner.js",
+  "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/scanner.js",
-    "dev": "tsx watch src/scanner.ts"
+    "start": "node dist/server.js",
+    "start:scanner": "node dist/scanner.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "jest --forceExit --detectOpenHandles"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.0",
@@ -15,7 +17,10 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
+    "@types/jest": "^29.5.0",
     "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }
