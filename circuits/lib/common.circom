@@ -123,11 +123,25 @@ template StealthECDH() {
     signal output shared_secret;
     signal output stealth_owner;
 
+    // BabyJubJub curve parameters (twisted Edwards form: a*x^2 + y^2 = 1 + d*x^2*y^2)
+    var A = 168700;
+    var D = 168696;
+
     // BabyJubJub base point (same as circomlib's Base8)
     var BASE8[2] = [
         5299619240641551281634865583518297030282874472190772894086521144482721001553,
         16950150798460657717958625567821834550301663161624707787222815936182638968203
     ];
+
+    // ---- Point-on-curve validation for recipient_viewing_pubkey ----
+    // Verify: A * x^2 + y^2 == 1 + D * x^2 * y^2
+    signal x2;
+    signal y2;
+    signal x2y2;
+    x2 <== recipient_viewing_pubkey[0] * recipient_viewing_pubkey[0];
+    y2 <== recipient_viewing_pubkey[1] * recipient_viewing_pubkey[1];
+    x2y2 <== x2 * y2;
+    A * x2 + y2 === 1 + D * x2y2;
 
     // Decompose ephemeral_key to 253 bits for scalar multiplication
     component eph_bits = Num2Bits(253);
