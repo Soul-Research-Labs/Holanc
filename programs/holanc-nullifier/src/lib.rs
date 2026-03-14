@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use sha2::{Sha256, Digest};
 
 declare_id!("BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si");
 
@@ -36,8 +37,12 @@ pub mod holanc_nullifier {
     ) -> Result<()> {
         let page = &mut ctx.accounts.nullifier_page;
 
-        // Compute bit index within the page from nullifier bytes
-        let bit_index = (nullifier[31] as usize) % SLOTS_PER_PAGE;
+        // Hash the full nullifier to derive a uniformly-distributed bit index.
+        // This avoids the previous bug where only nullifier[31] was used
+        // (8-bit entropy → 1/256 false-positive collision rate).
+        let digest = Sha256::digest(nullifier);
+        let bit_index = u16::from_le_bytes([digest[0], digest[1]]) as usize
+            % SLOTS_PER_PAGE;
         let byte_index = bit_index / 8;
         let bit_offset = bit_index % 8;
 
@@ -68,7 +73,9 @@ pub mod holanc_nullifier {
         nullifier: [u8; 32],
     ) -> Result<()> {
         let page = &ctx.accounts.nullifier_page;
-        let bit_index = (nullifier[31] as usize) % SLOTS_PER_PAGE;
+        let digest = Sha256::digest(nullifier);
+        let bit_index = u16::from_le_bytes([digest[0], digest[1]]) as usize
+            % SLOTS_PER_PAGE;
         let byte_index = bit_index / 8;
         let bit_offset = bit_index % 8;
 
@@ -119,6 +126,10 @@ pub mod holanc_nullifier {
 
     /// Register a domain-separated V2 nullifier.
     /// V2 nullifier = Poseidon(Poseidon(sk, cm), Poseidon(chain_id, app_id))
+    ///
+    /// The bitmap index incorporates chain_id and app_id for true cross-chain
+    /// domain separation — the same nullifier on different chains maps to
+    /// different bitmap slots.
     pub fn register_nullifier_v2(
         ctx: Context<RegisterNullifier>,
         nullifier: [u8; 32],
@@ -127,7 +138,16 @@ pub mod holanc_nullifier {
     ) -> Result<()> {
         let page = &mut ctx.accounts.nullifier_page;
 
-        let bit_index = (nullifier[31] as usize) % SLOTS_PER_PAGE;
+        // Domain-separated hash: include chain_id and app_id in the digest
+        // so the same nullifier on different chains maps to different bitmap slots.
+        let mut hasher = Sha256::new();
+        hasher.update(nullifier);
+        hasher.update(chain_id.to_le_bytes());
+        hasher.update(app_id.to_le_bytes());
+        let digest = hasher.finalize();
+
+        let bit_index = u16::from_le_bytes([digest[0], digest[1]]) as usize
+            % SLOTS_PER_PAGE;
         let byte_index = bit_index / 8;
         let bit_offset = bit_index % 8;
 
