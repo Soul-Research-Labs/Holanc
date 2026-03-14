@@ -40,16 +40,17 @@ pub fn note_commitment(
     Ok(NoteCommitment(hash))
 }
 
-/// Compute a simplified commitment for deposit (without asset_id):
-///   commitment = Poseidon(owner, value, blinding)
+/// Compute a deposit commitment (same as note_commitment, 4-input Poseidon):
+///   commitment = Poseidon(owner, value, asset_id, blinding)
+///
+/// This MUST match the in-circuit NoteCommitment template which uses 4 inputs.
 pub fn deposit_commitment(
     owner: &[u8; 32],
     value: u64,
+    asset_id: &[u8; 32],
     blinding: &[u8; 32],
 ) -> Result<NoteCommitment, PoseidonError> {
-    let value_bytes = u64_to_field_bytes(value);
-    let hash = poseidon_hash_multi(&[*owner, value_bytes, *blinding])?;
-    Ok(NoteCommitment(hash))
+    note_commitment(owner, value, asset_id, blinding)
 }
 
 /// Hash two commitments together (for Merkle tree internal nodes).
@@ -110,24 +111,25 @@ mod tests {
     fn test_deposit_commitment_deterministic() {
         let owner = [1u8; 32];
         let value = 500u64;
+        let asset_id = [2u8; 32];
         let blinding = [3u8; 32];
 
-        let c1 = deposit_commitment(&owner, value, &blinding).unwrap();
-        let c2 = deposit_commitment(&owner, value, &blinding).unwrap();
+        let c1 = deposit_commitment(&owner, value, &asset_id, &blinding).unwrap();
+        let c2 = deposit_commitment(&owner, value, &asset_id, &blinding).unwrap();
         assert_eq!(c1, c2);
     }
 
     #[test]
-    fn test_deposit_commitment_differs_from_note_commitment() {
+    fn test_deposit_commitment_matches_note_commitment() {
         let owner = [1u8; 32];
         let value = 100u64;
         let blinding = [3u8; 32];
-        let asset_id = [0u8; 32];
+        let asset_id = [2u8; 32];
 
-        let dc = deposit_commitment(&owner, value, &blinding).unwrap();
+        let dc = deposit_commitment(&owner, value, &asset_id, &blinding).unwrap();
         let nc = note_commitment(&owner, value, &asset_id, &blinding).unwrap();
-        // 3-input vs 4-input hash should differ even with zero asset_id
-        assert_ne!(dc, nc);
+        // deposit_commitment is now 4-input Poseidon, matching note_commitment
+        assert_eq!(dc, nc);
     }
 
     #[test]
