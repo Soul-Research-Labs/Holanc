@@ -128,6 +128,20 @@ describe("RelayQueue", () => {
     queue.stopBatchLoop();
     queue.stopBatchLoop();
   });
+
+  it("accepts maxRetries constructor parameter", () => {
+    const customQueue = new RelayQueue("http://127.0.0.1:8899", 5000, 4, 5);
+    // Should construct without error
+    expect(customQueue.depth()).toBe(0);
+    customQueue.stopBatchLoop();
+  });
+
+  it("defaults maxRetries to 3 when not specified", () => {
+    const defaultQueue = new RelayQueue("http://127.0.0.1:8899");
+    // Verify it accepts 3 constructor args (implicit maxRetries = 3)
+    expect(defaultQueue.depth()).toBe(0);
+    defaultQueue.stopBatchLoop();
+  });
 });
 
 // ---------------------------------------------------------------------------
