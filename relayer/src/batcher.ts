@@ -148,7 +148,9 @@ export class RelayQueue {
       } catch (err: unknown) {
         entry.status.state = "failed";
         entry.status.error = "Invalid transaction data";
-        console.error(`[batcher] invalid tx ${entry.id}: ${entry.status.error}`);
+        console.error(
+          `[batcher] invalid tx ${entry.id}: ${entry.status.error}`,
+        );
         return;
       }
 
@@ -181,7 +183,9 @@ export class RelayQueue {
           if (attempt < this.maxRetries) {
             const backoffMs = Math.min(1000 * 2 ** attempt, 8000);
             console.warn(
-              `[batcher] attempt ${attempt + 1}/${this.maxRetries + 1} failed for ${entry.id}, retrying in ${backoffMs}ms`,
+              `[batcher] attempt ${attempt + 1}/${
+                this.maxRetries + 1
+              } failed for ${entry.id}, retrying in ${backoffMs}ms`,
             );
             await sleep(backoffMs);
           }
@@ -190,7 +194,11 @@ export class RelayQueue {
 
       entry.status.state = "failed";
       entry.status.error = lastError;
-      console.error(`[batcher] failed ${entry.id} after ${this.maxRetries + 1} attempts: ${lastError}`);
+      console.error(
+        `[batcher] failed ${entry.id} after ${
+          this.maxRetries + 1
+        } attempts: ${lastError}`,
+      );
     });
 
     await Promise.allSettled(results);
