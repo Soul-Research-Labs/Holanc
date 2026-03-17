@@ -240,6 +240,10 @@ pub mod holanc_pool {
         }
 
         // Append output commitments
+        require!(
+            encrypted_notes.len() == output_commitments.len(),
+            HolancPoolError::MissingEncryptedNote
+        );
         for (i, commitment) in output_commitments.iter().enumerate() {
             let leaf_index = pool.next_leaf_index;
             pool.next_leaf_index = pool
@@ -251,7 +255,7 @@ pub mod holanc_pool {
                 pool: pool_key,
                 leaf_index,
                 commitment: *commitment,
-                encrypted_note: encrypted_notes.get(i).cloned().unwrap_or_default(),
+                encrypted_note: encrypted_notes[i].clone(),
             });
         }
 
@@ -397,6 +401,10 @@ pub mod holanc_pool {
             .ok_or(HolancPoolError::InsufficientPoolBalance)?;
 
         // Append change output commitments
+        require!(
+            encrypted_notes.len() == output_commitments.len(),
+            HolancPoolError::MissingEncryptedNote
+        );
         for (i, commitment) in output_commitments.iter().enumerate() {
             let leaf_index = pool.next_leaf_index;
             pool.next_leaf_index = pool
@@ -408,7 +416,7 @@ pub mod holanc_pool {
                 pool: pool_key,
                 leaf_index,
                 commitment: *commitment,
-                encrypted_note: encrypted_notes.get(i).cloned().unwrap_or_default(),
+                encrypted_note: encrypted_notes[i].clone(),
             });
         }
 
@@ -994,4 +1002,6 @@ pub enum HolancPoolError {
     CommitmentBridgeLocked,
     #[msg("Invalid commitment lock PDA")]
     InvalidCommitmentLockPDA,
+    #[msg("encrypted_notes length must match output_commitments length")]
+    MissingEncryptedNote,
 }
