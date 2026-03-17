@@ -20,6 +20,8 @@ pub enum WalletError {
     NoteNotFound(u64),
     #[error("Wallet persistence failed: {0}")]
     PersistenceFailed(String),
+    #[error("Merkle tree is full — pool capacity exhausted")]
+    TreeFull,
 }
 
 /// Transaction record for wallet history.
@@ -93,13 +95,13 @@ impl Wallet {
     }
 
     /// Add a note received from a deposit.
-    pub fn add_deposit_note(&mut self, value: u64) -> Note {
+    pub fn add_deposit_note(&mut self, value: u64) -> Result<Note, WalletError> {
         let note = Note::new(*self.owner(), value, self.asset_id);
         let commitment = note.commitment();
         let (leaf_index, _root) = self
             .tree
             .append(*commitment.as_bytes())
-            .expect("tree should not be full");
+            .map_err(|_| WalletError::TreeFull)?;
 
         let mut note = note;
         note.leaf_index = Some(leaf_index);
@@ -110,7 +112,7 @@ impl Wallet {
             leaf_index,
         });
 
-        note
+        Ok(note)
     }
 
     /// Select notes for spending, returning up to 2 notes that cover the amount.
