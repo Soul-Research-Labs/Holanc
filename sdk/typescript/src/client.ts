@@ -21,18 +21,21 @@ import {
 } from "./types";
 import { FailoverConnection, FailoverConfig, RpcEndpointConfig } from "./rpc";
 
-/** Program IDs — must match deployed Anchor programs. */
+/** Program IDs — must match deployed Anchor programs.
+ * Can be overridden via environment variables for devnet/testnet deployments:
+ *   POOL_PROGRAM_ID, VERIFIER_PROGRAM_ID, NULLIFIER_PROGRAM_ID, BRIDGE_PROGRAM_ID
+ */
 const POOL_PROGRAM_ID = new PublicKey(
-  "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
+  process.env["POOL_PROGRAM_ID"] ?? "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
 );
 const VERIFIER_PROGRAM_ID = new PublicKey(
-  "GmkUhTQ5LKxRFfwEhJTGYpsBE8Y7mMBpfqwe7mX71Gpi",
+  process.env["VERIFIER_PROGRAM_ID"] ?? "GmkUhTQ5LKxRFfwEhJTGYpsBE8Y7mMBpfqwe7mX71Gpi",
 );
 const NULLIFIER_PROGRAM_ID = new PublicKey(
-  "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+  process.env["NULLIFIER_PROGRAM_ID"] ?? "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
 );
 const BRIDGE_PROGRAM_ID = new PublicKey(
-  "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
+  process.env["BRIDGE_PROGRAM_ID"] ?? "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
 );
 
 /**
@@ -282,7 +285,7 @@ export class HolancClient {
         },
         { pubkey: VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
         {
-          pubkey: verificationKey ?? PublicKey.default,
+          pubkey: requireVerificationKey(verificationKey),
           isSigner: false,
           isWritable: false,
         },
@@ -413,7 +416,7 @@ export class HolancClient {
         },
         { pubkey: VERIFIER_PROGRAM_ID, isSigner: false, isWritable: false },
         {
-          pubkey: verificationKey ?? PublicKey.default,
+          pubkey: requireVerificationKey(verificationKey),
           isSigner: false,
           isWritable: false,
         },
@@ -607,6 +610,19 @@ export class HolancClient {
     }
     return Buffer.concat(parts);
   }
+}
+
+/**
+ * Guard that throws a clear error when a verificationKey is required but not supplied.
+ * Prevents the all-zeros PublicKey.default from being silently passed on-chain.
+ */
+function requireVerificationKey(key?: PublicKey): PublicKey {
+  if (!key) {
+    throw new Error(
+      "verificationKey is required for transfer/withdraw — pass the on-chain verification key account",
+    );
+  }
+  return key;
 }
 
 /** Encode a BigInt as a 32-byte big-endian buffer. */

@@ -202,18 +202,45 @@ export class HolancProver {
 
   /**
    * Verify a Groth16 proof locally (for testing / debugging).
+   *
+   * Loads the verification key from `<circuitDir>/<circuitName>/<circuitName>_vkey.json`.
+   * Run `./scripts/setup-circuits.sh` first to generate vkey files.
    */
   async verifyLocally(
     circuitName: string,
     proof: Groth16Proof,
     publicSignals: string[],
   ): Promise<boolean> {
+    const fs = await import("fs");
+    const path = await import("path");
     const snarks = await loadSnarkjs();
-    const vkeyPath = `${this.circuitDir}/${circuitName}/${circuitName}_vkey.json`;
-    // In a real implementation, load vkey from file
-    // For now, we rely on snarkjs verify
-    const vkey = await import(vkeyPath);
-    return snarks.groth16.verify(vkey, publicSignals, proof);
+
+    const vkeyPath = path.join(
+      this.circuitDir,
+      circuitName,
+      `${circuitName}_vkey.json`,
+    );
+
+    if (!fs.existsSync(vkeyPath)) {
+      throw new Error(
+        `Verification key not found at ${vkeyPath}. ` +
+          `Run ./scripts/setup-circuits.sh to generate circuit artifacts.`,
+      );
+    }
+
+    const vkeyRaw = fs.readFileSync(vkeyPath, "utf-8");
+    const vkey = JSON.parse(vkeyRaw);
+
+    // Convert Groth16Proof back to snarkjs proof format
+    const snarkjsProof = {
+      pi_a: [...proof.piA, "1"],
+      pi_b: proof.piB.map((pair) => [...pair, "1"]),
+      pi_c: [...proof.piC, "1"],
+      protocol: proof.protocol,
+      curve: proof.curve,
+    };
+
+    return snarks.groth16.verify(vkey, publicSignals, snarkjsProof);
   }
 
   // ------------------------------------------------------------------

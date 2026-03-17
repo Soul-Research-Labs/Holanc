@@ -10,6 +10,11 @@ const VERIFIER_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
     0x13, 0x20, 0x07, 0xab, 0x3d, 0x64, 0x9a, 0x0b,
 ]);
 
+/// Anchor instruction discriminator for holanc-verifier's `verify_proof` instruction.
+/// Derived as: SHA256("global:verify_proof")[0..8]
+/// Kept as a named constant rather than inline to make the coupling explicit and auditable.
+const VERIFY_PROOF_DISCRIMINATOR: [u8; 8] = [0xd9, 0xd3, 0xbf, 0x6e, 0x90, 0x0d, 0xba, 0x62];
+
 /// Maximum number of compliance oracles that can be registered.
 pub const MAX_ORACLES: usize = 16;
 
@@ -615,11 +620,8 @@ fn verify_proof_cpi<'info>(
     use anchor_lang::solana_program::instruction::Instruction;
     use anchor_lang::solana_program::program::invoke;
 
-    // Anchor discriminator for "verify_proof" = first 8 bytes of SHA256("global:verify_proof")
-    let discriminator: [u8; 8] = [0xd9, 0xd3, 0xbf, 0x6e, 0x90, 0x0d, 0xba, 0x62];
-
     let mut data = Vec::with_capacity(8 + 64 + 128 + 64 + 4 + public_inputs.len() * 32);
-    data.extend_from_slice(&discriminator);
+    data.extend_from_slice(&VERIFY_PROOF_DISCRIMINATOR);
     data.extend_from_slice(&proof_a);
     data.extend_from_slice(&proof_b);
     data.extend_from_slice(&proof_c);
