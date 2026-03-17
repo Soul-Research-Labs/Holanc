@@ -30,11 +30,14 @@ fn main() {
     let stdin = io::stdin();
     loop {
         print!("holanc> ");
-        io::stdout().flush().unwrap();
+        if io::stdout().flush().is_err() {
+            break; // stdout closed (broken pipe)
+        }
 
         let mut line = String::new();
-        if stdin.lock().read_line(&mut line).unwrap() == 0 {
-            break;
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => break, // EOF or I/O error
+            _ => {}
         }
         let line = line.trim();
         if line.is_empty() {

@@ -120,15 +120,21 @@ impl HolancProver {
 
         std::fs::write(&input_path, serde_json::to_string_pretty(input)?)?;
 
+        let to_str = |p: &std::path::Path| -> Result<&str, ProverError> {
+            p.to_str().ok_or_else(|| {
+                ProverError::ProofGenerationFailed(format!("non-UTF-8 path: {}", p.display()))
+            })
+        };
+
         let output = Command::new("snarkjs")
             .args([
                 "groth16",
                 "fullprove",
-                input_path.to_str().unwrap(),
-                wasm_path.to_str().unwrap(),
-                zkey_path.to_str().unwrap(),
-                proof_path.to_str().unwrap(),
-                public_path.to_str().unwrap(),
+                to_str(&input_path)?,
+                to_str(&wasm_path)?,
+                to_str(&zkey_path)?,
+                to_str(&proof_path)?,
+                to_str(&public_path)?,
             ])
             .output()?;
 
