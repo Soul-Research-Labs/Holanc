@@ -128,12 +128,12 @@ Each input note must have a valid Merkle path to one of the 100 recent historica
 
 Holanc uses two parallel Merkle trees over the same set of commitments:
 
-| Property    | On-chain tree       | Circuit tree        |
-| ----------- | ------------------- | ------------------- |
-| Hash        | SHA-256             | Poseidon            |
-| Purpose     | Cheap root tracking | ZK-friendly proofs  |
-| CU cost     | ~100 CU (syscall)   | ~6k constraints     |
-| Updated by  | Pool program        | Client / relayer    |
+| Property   | On-chain tree       | Circuit tree       |
+| ---------- | ------------------- | ------------------ |
+| Hash       | SHA-256             | Poseidon           |
+| Purpose    | Cheap root tracking | ZK-friendly proofs |
+| CU cost    | ~100 CU (syscall)   | ~6k constraints    |
+| Updated by | Pool program        | Client / relayer   |
 
 ### Invariant
 
@@ -141,13 +141,13 @@ For every leaf index _i_, the SHA-256 tree and the Poseidon tree contain the **s
 
 ### Threat Analysis
 
-| Scenario | Impact | Detection | Mitigation |
-| --- | --- | --- | --- |
-| Client computes wrong Poseidon path | Proof verification fails (invalid root) | Immediate: groth16 verify rejects | None needed — soundness enforced by verifier |
-| Relayer submits stale Poseidon root | Proof passes but root not in `root_history` ring buffer | Immediate: `update_root` checks SHA-256 root freshness | Pool rejects if SHA-256 root mismatch |
-| Indexer misses a commitment event | Client builds Poseidon tree with wrong leaves → root mismatch | On next proof attempt | Re-scan from last confirmed checkpoint (crash-safe scanner) |
-| SHA-256 tree diverges from Poseidon tree | Funds locked — valid Poseidon proof rejected by SHA-256 check | Monitoring: compare local Poseidon root with on-chain SHA-256 root | Emergency admin `pause`; off-chain tree resync |
-| Malicious program upgrade changes SHA-256 logic | Tree corruption | Governance / multisig review | Anchor upgrade authority; immutable after audit |
+| Scenario                                        | Impact                                                        | Detection                                                          | Mitigation                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Client computes wrong Poseidon path             | Proof verification fails (invalid root)                       | Immediate: groth16 verify rejects                                  | None needed — soundness enforced by verifier                |
+| Relayer submits stale Poseidon root             | Proof passes but root not in `root_history` ring buffer       | Immediate: `update_root` checks SHA-256 root freshness             | Pool rejects if SHA-256 root mismatch                       |
+| Indexer misses a commitment event               | Client builds Poseidon tree with wrong leaves → root mismatch | On next proof attempt                                              | Re-scan from last confirmed checkpoint (crash-safe scanner) |
+| SHA-256 tree diverges from Poseidon tree        | Funds locked — valid Poseidon proof rejected by SHA-256 check | Monitoring: compare local Poseidon root with on-chain SHA-256 root | Emergency admin `pause`; off-chain tree resync              |
+| Malicious program upgrade changes SHA-256 logic | Tree corruption                                               | Governance / multisig review                                       | Anchor upgrade authority; immutable after audit             |
 
 ### Why Two Trees?
 

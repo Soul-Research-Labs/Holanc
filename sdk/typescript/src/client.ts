@@ -26,16 +26,20 @@ import { FailoverConnection, FailoverConfig, RpcEndpointConfig } from "./rpc";
  *   POOL_PROGRAM_ID, VERIFIER_PROGRAM_ID, NULLIFIER_PROGRAM_ID, BRIDGE_PROGRAM_ID
  */
 const POOL_PROGRAM_ID = new PublicKey(
-  process.env["POOL_PROGRAM_ID"] ?? "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
+  process.env["POOL_PROGRAM_ID"] ??
+    "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
 );
 const VERIFIER_PROGRAM_ID = new PublicKey(
-  process.env["VERIFIER_PROGRAM_ID"] ?? "GmkUhTQ5LKxRFfwEhJTGYpsBE8Y7mMBpfqwe7mX71Gpi",
+  process.env["VERIFIER_PROGRAM_ID"] ??
+    "GmkUhTQ5LKxRFfwEhJTGYpsBE8Y7mMBpfqwe7mX71Gpi",
 );
 const NULLIFIER_PROGRAM_ID = new PublicKey(
-  process.env["NULLIFIER_PROGRAM_ID"] ?? "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+  process.env["NULLIFIER_PROGRAM_ID"] ??
+    "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
 );
 const BRIDGE_PROGRAM_ID = new PublicKey(
-  process.env["BRIDGE_PROGRAM_ID"] ?? "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
+  process.env["BRIDGE_PROGRAM_ID"] ??
+    "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
 );
 
 /**

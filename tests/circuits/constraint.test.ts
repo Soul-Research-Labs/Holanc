@@ -408,7 +408,10 @@ describe("circuit constraint satisfaction tests", () => {
       };
 
       const witness = await calculateWitness(circuitName, input);
-      assert.isNotNull(witness, "Wealth proof witness should succeed above threshold");
+      assert.isNotNull(
+        witness,
+        "Wealth proof witness should succeed above threshold",
+      );
     });
 
     it("rejects when total value is below threshold", async () => {
@@ -530,7 +533,10 @@ describe("circuit constraint satisfaction tests", () => {
       };
 
       const witness = await calculateWitness(circuitName, input);
-      assert.isNotNull(witness, "transfer_v2 witness should succeed with valid domain separation");
+      assert.isNotNull(
+        witness,
+        "transfer_v2 witness should succeed with valid domain separation",
+      );
     });
 
     it("domain separation: same spending key on different chains produces different nullifiers", async () => {
@@ -607,8 +613,14 @@ describe("circuit constraint satisfaction tests", () => {
       const merklePathElements: string[][] = inValues.map(() => defaultPath());
       const merklePathIndices: string[][] = inValues.map(() => defaultPath());
       // Slot 0 and 1 share the same minimal tree
-      merklePathElements[0] = [inCommitments[1].toString(), ...new Array(TREE_DEPTH - 1).fill("0")];
-      merklePathElements[1] = [inCommitments[0].toString(), ...new Array(TREE_DEPTH - 1).fill("0")];
+      merklePathElements[0] = [
+        inCommitments[1].toString(),
+        ...new Array(TREE_DEPTH - 1).fill("0"),
+      ];
+      merklePathElements[1] = [
+        inCommitments[0].toString(),
+        ...new Array(TREE_DEPTH - 1).fill("0"),
+      ];
       merklePathIndices[0] = ["0", ...new Array(TREE_DEPTH - 1).fill("0")];
       merklePathIndices[1] = ["1", ...new Array(TREE_DEPTH - 1).fill("0")];
       let rootHash = await poseidon([inCommitments[0], inCommitments[1]]);
@@ -625,7 +637,9 @@ describe("circuit constraint satisfaction tests", () => {
       const fee = 10n;
 
       const outCommitments = await Promise.all(
-        outValues.map((v, i) => poseidon([outOwners[i], v, assetId, outBlinding[i]])),
+        outValues.map((v, i) =>
+          poseidon([outOwners[i], v, assetId, outBlinding[i]]),
+        ),
       );
 
       const input = {
@@ -649,7 +663,10 @@ describe("circuit constraint satisfaction tests", () => {
       };
 
       const witness = await calculateWitness(circuitName, input);
-      assert.isNotNull(witness, "transfer_4x4 witness should succeed for valid 2-active inputs");
+      assert.isNotNull(
+        witness,
+        "transfer_4x4 witness should succeed for valid 2-active inputs",
+      );
     });
 
     it("rejects transfer_4x4 with unbalanced values (outputs exceed inputs)", async () => {
@@ -684,7 +701,9 @@ describe("circuit constraint satisfaction tests", () => {
       const outOwners = [ownerPub, ownerPub, ownerPub, ownerPub];
       const outBlinding = [33n, 0n, 0n, 0n];
       const outCommitments = await Promise.all(
-        outValues.map((v, i) => poseidon([outOwners[i], v, assetId, outBlinding[i]])),
+        outValues.map((v, i) =>
+          poseidon([outOwners[i], v, assetId, outBlinding[i]]),
+        ),
       );
 
       const input = {
@@ -760,8 +779,14 @@ describe("circuit constraint satisfaction tests", () => {
       const ephemeralKey = 12345n;
       const recipientSpendingPubkey = 67890n;
 
-      const stealthOwner1 = await poseidon([ephemeralKey, recipientSpendingPubkey]);
-      const stealthOwner2 = await poseidon([ephemeralKey, recipientSpendingPubkey]);
+      const stealthOwner1 = await poseidon([
+        ephemeralKey,
+        recipientSpendingPubkey,
+      ]);
+      const stealthOwner2 = await poseidon([
+        ephemeralKey,
+        recipientSpendingPubkey,
+      ]);
       assert.equal(
         stealthOwner1.toString(),
         stealthOwner2.toString(),

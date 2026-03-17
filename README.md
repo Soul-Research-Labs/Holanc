@@ -2,8 +2,6 @@
 
 **Cross-chain ZK privacy protocol for Solana and SVM-compatible blockchains.**
 
-Holanc combines the privacy middleware patterns of [ZAseon](https://github.com/Soul-Research-Labs/ZAseon) and the privacy coprocessor architecture of [Lumora](https://github.com/Soul-Research-Labs/Lumora), re-implemented natively for the Solana Virtual Machine using Groth16 on BN254.
-
 ## Architecture
 
 ```
