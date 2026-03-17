@@ -144,7 +144,9 @@ describe("FailoverConnection", () => {
         return "ok";
       });
 
-      expect(fc.status().find((e) => e.url === "http://rpc1.test")!.healthy).toBe(false);
+      expect(
+        fc.status().find((e) => e.url === "http://rpc1.test")!.healthy,
+      ).toBe(false);
 
       fc.reset();
       expect(fc.status().every((e) => e.healthy)).toBe(true);
@@ -159,7 +161,8 @@ describe("FailoverConnection", () => {
 
       await expect(
         fc.exec(
-          () => new Promise((resolve) => setTimeout(() => resolve("late"), 200)),
+          () =>
+            new Promise((resolve) => setTimeout(() => resolve("late"), 200)),
         ),
       ).rejects.toThrow("RPC timeout");
     });
