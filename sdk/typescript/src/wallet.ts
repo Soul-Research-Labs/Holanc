@@ -6,6 +6,7 @@ import {
   hexToField,
   fieldToHex,
 } from "./poseidon";
+import { decryptNote, type EncryptedNote } from "./encryption";
 
 interface TxRecord {
   kind: "deposit" | "send" | "withdraw";
@@ -38,6 +39,7 @@ interface WalletSnapshot {
   version: 1;
   spendingKey: string;
   nextBlinding: number;
+  lastSyncedLeaf: number;
   notes: NoteSnapshot[];
   txHistory: TxRecordSnapshot[];
 }
@@ -312,6 +314,99 @@ export class HolancWallet {
   }
 
   // -------------------------------------------------------------------------
+  // Indexer sync — fetch & decrypt incoming notes
+  // -------------------------------------------------------------------------
+
+  /** Last leaf index that was synced from the indexer. */
+  private lastSyncedLeaf = -1;
+
+  /**
+   * Fetch encrypted notes from the indexer, trial-decrypt each, and
+   * merge any successfully decrypted notes into the local note set.
+   *
+   * @param indexerUrl  Base URL of the indexer HTTP server (e.g. "http://localhost:3002").
+   * @returns Number of new notes discovered.
+   */
+  async fetchIncomingNotes(indexerUrl: string): Promise<number> {
+    const limit = 500;
+    const url = new URL(
+      `/notes?after=${this.lastSyncedLeaf}&limit=${limit}`,
+      indexerUrl,
+    );
+
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      throw new Error(`Indexer returned ${res.status}: ${await res.text()}`);
+    }
+
+    const body: {
+      notes: Array<{
+        commitment: string;
+        leafIndex: number;
+        encryptedNote: string;
+      }>;
+    } = await res.json();
+
+    if (!body.notes || body.notes.length === 0) return 0;
+
+    const existingCommitments = new Set(this.notes.map((n) => n.commitment));
+    let discovered = 0;
+
+    for (const indexed of body.notes) {
+      // Advance watermark regardless of decryption success
+      if (indexed.leafIndex > this.lastSyncedLeaf) {
+        this.lastSyncedLeaf = indexed.leafIndex;
+      }
+
+      // Skip notes we already have
+      if (existingCommitments.has(indexed.commitment)) continue;
+
+      // Parse the encrypted note bundle from hex
+      const cipherBytes = Uint8Array.from(
+        Buffer.from(indexed.encryptedNote, "hex"),
+      );
+
+      // The on-chain format is: ephemeral_pubkey_x (32) || ephemeral_pubkey_y (32) || ciphertext
+      if (cipherBytes.length < 65) continue; // too short to contain a valid note
+
+      const ephX = Buffer.from(cipherBytes.slice(0, 32))
+        .toString("hex")
+        .padStart(64, "0");
+      const ephY = Buffer.from(cipherBytes.slice(32, 64))
+        .toString("hex")
+        .padStart(64, "0");
+      const ct = cipherBytes.slice(64);
+
+      const enc: EncryptedNote = {
+        ephemeralPubKey: [ephX, ephY],
+        ciphertext: ct,
+      };
+
+      const pt = await decryptNote(enc, this.spendingKeyHex());
+      if (!pt) continue; // not addressed to us
+
+      const note: Note = {
+        owner: this.spendingKeyHex(),
+        value: pt.value,
+        assetId: pt.assetId,
+        blinding: pt.blinding,
+        commitment: "",
+        nullifier: "",
+        leafIndex: indexed.leafIndex,
+        spent: false,
+      };
+      note.commitment = await this.computeCommitment(note);
+      note.nullifier = await this.computeNullifier(note);
+
+      this.notes.push(note);
+      existingCommitments.add(note.commitment);
+      discovered++;
+    }
+
+    return discovered;
+  }
+
+  // -------------------------------------------------------------------------
   // Persistence
   // -------------------------------------------------------------------------
 
@@ -329,6 +424,7 @@ export class HolancWallet {
       version: 1,
       spendingKey: Buffer.from(this.spendingKey).toString("hex"),
       nextBlinding: this.nextBlinding,
+      lastSyncedLeaf: this.lastSyncedLeaf,
       notes: this.notes.map((n) => ({
         owner: n.owner,
         value: n.value.toString(),
@@ -370,6 +466,7 @@ export class HolancWallet {
     await wallet.initViewingKey();
 
     wallet.nextBlinding = data.nextBlinding;
+    wallet.lastSyncedLeaf = data.lastSyncedLeaf ?? -1;
     wallet.notes = data.notes.map((n) => ({
       owner: n.owner,
       value: BigInt(n.value),
