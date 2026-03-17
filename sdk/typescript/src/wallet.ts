@@ -13,6 +13,35 @@ interface TxRecord {
   timestamp: number;
 }
 
+/** Serialized form of a Note (BigInt fields serialized as strings). */
+interface NoteSnapshot {
+  owner: string;
+  value: string;
+  assetId: string;
+  blinding: string;
+  commitment: string;
+  nullifier: string;
+  spent: boolean;
+  pending: boolean;
+  leafIndex: number | null;
+}
+
+/** Serialized form of a TxRecord. */
+interface TxRecordSnapshot {
+  kind: string;
+  amount: string;
+  timestamp: number;
+}
+
+/** Wallet persistence format (version-tagged for forward compatibility). */
+interface WalletSnapshot {
+  version: 1;
+  spendingKey: string;
+  nextBlinding: number;
+  notes: NoteSnapshot[];
+  txHistory: TxRecordSnapshot[];
+}
+
 /**
  * HolancWallet — off-chain key management and note tracking.
  *
@@ -280,6 +309,85 @@ export class HolancWallet {
   private async deriveBlinding(): Promise<Hash32> {
     const idx = this.nextBlinding++;
     return poseidonHashHex([hexToField(this.spendingKeyHex()), BigInt(idx)]);
+  }
+
+  // -------------------------------------------------------------------------
+  // Persistence
+  // -------------------------------------------------------------------------
+
+  /**
+   * Serialize the wallet to a JSON file.
+   *
+   * The spending key is stored as a hex string. Keep the wallet file secure —
+   * it grants full control over all shielded notes.
+   *
+   * @param filePath - Absolute or relative path to the output file.
+   */
+  save(filePath: string): void {
+    const fs: typeof import("fs") = require("fs");
+    const data: WalletSnapshot = {
+      version: 1,
+      spendingKey: Buffer.from(this.spendingKey).toString("hex"),
+      nextBlinding: this.nextBlinding,
+      notes: this.notes.map((n) => ({
+        owner: n.owner,
+        value: n.value.toString(),
+        assetId: n.assetId,
+        blinding: n.blinding,
+        commitment: n.commitment,
+        nullifier: n.nullifier,
+        spent: n.spent,
+        pending: n.pending ?? false,
+        leafIndex: n.leafIndex ?? null,
+      })),
+      txHistory: this.txHistory.map((r) => ({
+        kind: r.kind,
+        amount: r.amount.toString(),
+        timestamp: r.timestamp,
+      })),
+    };
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+  }
+
+  /**
+   * Restore a wallet from a previously saved JSON file.
+   *
+   * @param filePath - Path to the wallet JSON file created by `save()`.
+   */
+  static async load(filePath: string): Promise<HolancWallet> {
+    const fs: typeof import("fs") = require("fs");
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const data: WalletSnapshot = JSON.parse(raw);
+
+    if (data.version !== 1) {
+      throw new Error(
+        `Unsupported wallet snapshot version ${data.version}. Expected 1.`,
+      );
+    }
+
+    const spendingKey = Buffer.from(data.spendingKey, "hex");
+    const wallet = new HolancWallet(spendingKey);
+    await wallet.initViewingKey();
+
+    wallet.nextBlinding = data.nextBlinding;
+    wallet.notes = data.notes.map((n) => ({
+      owner: n.owner,
+      value: BigInt(n.value),
+      assetId: n.assetId,
+      blinding: n.blinding,
+      commitment: n.commitment,
+      nullifier: n.nullifier,
+      spent: n.spent,
+      pending: n.pending,
+      leafIndex: n.leafIndex ?? undefined,
+    }));
+    wallet.txHistory = data.txHistory.map((r) => ({
+      kind: r.kind as "deposit" | "send" | "withdraw",
+      amount: BigInt(r.amount),
+      timestamp: r.timestamp,
+    }));
+
+    return wallet;
   }
 }
 
