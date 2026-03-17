@@ -152,31 +152,9 @@ impl HolancProver {
         let _ = std::fs::remove_file(&public_path);
 
         Ok(Groth16Proof {
-            pi_a: proof_json["pi_a"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect(),
-            pi_b: proof_json["pi_b"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|v| {
-                    v.as_array().map(|inner| {
-                        inner
-                            .iter()
-                            .filter_map(|x| x.as_str().map(String::from))
-                            .collect()
-                    })
-                })
-                .collect(),
-            pi_c: proof_json["pi_c"]
-                .as_array()
-                .unwrap_or(&vec![])
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect(),
+            pi_a: parse_g1_point(&proof_json, "pi_a")?,
+            pi_b: parse_g2_point(&proof_json, "pi_b")?,
+            pi_c: parse_g1_point(&proof_json, "pi_c")?,
             public_signals,
         })
     }
@@ -213,4 +191,40 @@ impl HolancProver {
         let input = inputs::build_wealth_proof_input(params)?;
         self.prove("wealth_proof", &input)
     }
+}
+
+/// Extract a G1 point (Vec<String>) from proof JSON, returning ProverError on malformed data.
+fn parse_g1_point(proof: &serde_json::Value, key: &str) -> Result<Vec<String>, ProverError> {
+    let arr = proof[key]
+        .as_array()
+        .ok_or_else(|| ProverError::ProofGenerationFailed(format!("missing {key} in proof JSON")))?;
+    arr.iter()
+        .map(|v| {
+            v.as_str()
+                .map(String::from)
+                .ok_or_else(|| ProverError::ProofGenerationFailed(format!("{key} element is not a string")))
+        })
+        .collect()
+}
+
+/// Extract a G2 point (Vec<Vec<String>>) from proof JSON, returning ProverError on malformed data.
+fn parse_g2_point(proof: &serde_json::Value, key: &str) -> Result<Vec<Vec<String>>, ProverError> {
+    let arr = proof[key]
+        .as_array()
+        .ok_or_else(|| ProverError::ProofGenerationFailed(format!("missing {key} in proof JSON")))?;
+    arr.iter()
+        .map(|v| {
+            let inner = v.as_array().ok_or_else(|| {
+                ProverError::ProofGenerationFailed(format!("{key} element is not an array"))
+            })?;
+            inner
+                .iter()
+                .map(|x| {
+                    x.as_str()
+                        .map(String::from)
+                        .ok_or_else(|| ProverError::ProofGenerationFailed(format!("{key} inner element is not a string")))
+                })
+                .collect()
+        })
+        .collect()
 }

@@ -156,7 +156,9 @@ pub fn build_stealth_transfer_input(
     params: &StealthTransferParams,
 ) -> Result<Value, ProverError> {
     let mut base = build_transfer_input(&params.transfer)?;
-    let obj = base.as_object_mut().unwrap();
+    let obj = base.as_object_mut().ok_or_else(|| {
+        ProverError::InputGenerationFailed("transfer input is not a JSON object".into())
+    })?;
     obj.insert(
         "ephemeral_key".to_string(),
         json!(bytes_to_decimal(&params.ephemeral_key)),
