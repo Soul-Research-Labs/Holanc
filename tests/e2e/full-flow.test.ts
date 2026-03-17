@@ -30,13 +30,17 @@ import {
 } from "@solana/spl-token";
 import { assert } from "chai";
 
-const POOL_ID = new PublicKey("6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT");
-const NULLIFIER_ID = new PublicKey(
-  "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+const POOL_ID = new PublicKey(
+  process.env["POOL_PROGRAM_ID"] ?? "6fhYW9wEHD3yCdvfyBCg3jxVB7sWVmqNgQyvMwSFi1GT",
 );
-const BRIDGE_ID = new PublicKey("H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K");
+const NULLIFIER_ID = new PublicKey(
+  process.env["NULLIFIER_PROGRAM_ID"] ?? "BbcPjKizadFZb55MSFcg1q2MxAbnSbnvKvorTXutK3Si",
+);
+const BRIDGE_ID = new PublicKey(
+  process.env["BRIDGE_PROGRAM_ID"] ?? "H14juazDyYfTD4PT2oiBoLoHPKcWy4v6jggyNXJNG91K",
+);
 const COMPLIANCE_ID = new PublicKey(
-  "8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE",
+  process.env["COMPLIANCE_PROGRAM_ID"] ?? "8QKUprH8TMiffMga7tVJZ6qtvwZogmz9SibDswCWKnHE",
 );
 
 describe("holanc full-flow E2E", () => {

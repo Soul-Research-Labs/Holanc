@@ -228,22 +228,82 @@ describe("holanc-pool instructions", () => {
   });
 
   describe("update_root", () => {
-    it("updates merkle root as authority", async () => {
+    it("updates merkle root as authority with sha256 integrity check", async () => {
       if (!poolProgram) return;
+
+      // Fetch current pool state to get the current sha256_root
+      const poolBefore = await poolProgram.account.poolState.fetch(poolPda);
+      const currentSha256Root = poolBefore.sha256Root as number[];
 
       const newRoot = Buffer.alloc(32);
       newRoot.fill(0xcc);
 
       await poolProgram.methods
-        .updateRoot([...newRoot])
+        .updateRoot([...newRoot], currentSha256Root)
         .accounts({
           pool: poolPda,
           authority: payer.publicKey,
         })
         .rpc();
 
-      const poolAccount = await poolProgram.account.poolState.fetch(poolPda);
-      assert.deepEqual(Buffer.from(poolAccount.currentRoot), newRoot);
+      const poolAfter = await poolProgram.account.poolState.fetch(poolPda);
+      assert.deepEqual(
+        Buffer.from(poolAfter.currentRoot as number[]),
+        newRoot,
+        "Pool current root should be updated",
+      );
+    });
+
+    it("advances root_history_index in ring buffer across multiple updates", async () => {
+      if (!poolProgram) return;
+
+      const poolBefore = await poolProgram.account.poolState.fetch(poolPda);
+      const indexBefore = poolBefore.rootHistoryIndex as number;
+
+      for (let i = 0; i < 3; i++) {
+        const poolState = await poolProgram.account.poolState.fetch(poolPda);
+        const sha256Root = poolState.sha256Root as number[];
+        const newRoot = Buffer.alloc(32);
+        newRoot.fill(0xaa + i);
+
+        await poolProgram.methods
+          .updateRoot([...newRoot], sha256Root)
+          .accounts({
+            pool: poolPda,
+            authority: payer.publicKey,
+          })
+          .rpc();
+      }
+
+      const poolAfter = await poolProgram.account.poolState.fetch(poolPda);
+      const indexAfter = poolAfter.rootHistoryIndex as number;
+
+      // Ring buffer index should have advanced by 3 (mod ROOT_HISTORY_SIZE)
+      assert.equal(
+        (indexAfter - indexBefore + 100) % 100,
+        3,
+        "Root history index should advance by 3",
+      );
+    });
+
+    it("rejects update_root when sha256_root does not match", async () => {
+      if (!poolProgram) return;
+
+      const wrongSha256Root = Buffer.alloc(32, 0xff); // intentionally wrong
+      const newRoot = Buffer.alloc(32, 0xdd);
+
+      try {
+        await poolProgram.methods
+          .updateRoot([...newRoot], [...wrongSha256Root])
+          .accounts({
+            pool: poolPda,
+            authority: payer.publicKey,
+          })
+          .rpc();
+        assert.fail("Should have thrown for mismatched sha256_root");
+      } catch (err: any) {
+        assert.include(err.toString(), "RootIntegrityMismatch");
+      }
     });
   });
 
