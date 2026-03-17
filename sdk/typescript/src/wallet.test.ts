@@ -181,4 +181,163 @@ describe("HolancWallet", () => {
       expect(h[1].kind).toBe("send");
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Persistence: save / load
+  // -------------------------------------------------------------------------
+  describe("persistence", () => {
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+
+    let tmpFile: string;
+
+    beforeEach(() => {
+      tmpFile = path.join(
+        os.tmpdir(),
+        `holanc-wallet-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`,
+      );
+    });
+
+    afterEach(() => {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {}
+    });
+
+    it("round-trips wallet through save/load", async () => {
+      const wallet = await HolancWallet.random();
+      await wallet.createDepositNote(1000n);
+      await wallet.createDepositNote(500n);
+      wallet.save(tmpFile);
+
+      const restored = await HolancWallet.load(tmpFile);
+      expect(restored.spendingKeyHex()).toBe(wallet.spendingKeyHex());
+      expect(restored.balance()).toBe(1500n);
+      expect(restored.unspentNotes()).toHaveLength(2);
+    });
+
+    it("preserves tx history across save/load", async () => {
+      const wallet = await HolancWallet.random();
+      await wallet.createDepositNote(2000n);
+      await wallet.prepareTransfer("cd".repeat(32), 100n, 0n);
+      wallet.save(tmpFile);
+
+      const restored = await HolancWallet.load(tmpFile);
+      const h = restored.history();
+      expect(h).toHaveLength(2);
+      expect(h[0].kind).toBe("deposit");
+      expect(h[1].kind).toBe("send");
+      expect(h[0].amount).toBe(2000n);
+    });
+
+    it("preserves spent and pending state", async () => {
+      const wallet = await HolancWallet.random();
+      const note = await wallet.createDepositNote(1000n);
+      wallet.markSpent([note]);
+      wallet.save(tmpFile);
+
+      const restored = await HolancWallet.load(tmpFile);
+      expect(restored.balance()).toBe(0n);
+      expect(restored.unspentNotes()).toHaveLength(0);
+    });
+
+    it("rejects unsupported snapshot version", async () => {
+      const wallet = await HolancWallet.random();
+      wallet.save(tmpFile);
+
+      const raw = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+      raw.version = 99;
+      fs.writeFileSync(tmpFile, JSON.stringify(raw));
+
+      await expect(HolancWallet.load(tmpFile)).rejects.toThrow(
+        "Unsupported wallet snapshot version",
+      );
+    });
+
+    it("preserves blinding counter so new notes differ", async () => {
+      const wallet = await HolancWallet.random();
+      await wallet.createDepositNote(100n);
+      wallet.save(tmpFile);
+
+      const restored = await HolancWallet.load(tmpFile);
+      const newNote = await restored.createDepositNote(200n);
+      // The commitment must differ from the first note
+      const original = wallet.unspentNotes()[0];
+      expect(newNote.commitment).not.toBe(original.commitment);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // fetchIncomingNotes (mocked fetch)
+  // -------------------------------------------------------------------------
+  describe("fetchIncomingNotes", () => {
+    const originalFetch = globalThis.fetch;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    it("returns 0 when indexer has no notes", async () => {
+      const wallet = await HolancWallet.random();
+      globalThis.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ notes: [] }),
+      });
+
+      const count = await wallet.fetchIncomingNotes("http://localhost:3002");
+      expect(count).toBe(0);
+    });
+
+    it("throws on indexer HTTP error", async () => {
+      const wallet = await HolancWallet.random();
+      globalThis.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "Internal Server Error",
+      });
+
+      await expect(
+        wallet.fetchIncomingNotes("http://localhost:3002"),
+      ).rejects.toThrow("Indexer returned 500");
+    });
+
+    it("skips notes with too-short encrypted data", async () => {
+      const wallet = await HolancWallet.random();
+      globalThis.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          notes: [
+            {
+              commitment: "ab".repeat(32),
+              leafIndex: 5,
+              encryptedNote: "aabbcc", // way too short (3 bytes)
+            },
+          ],
+        }),
+      });
+
+      const count = await wallet.fetchIncomingNotes("http://localhost:3002");
+      expect(count).toBe(0); // note skipped because < 65 bytes
+    });
+
+    it("builds URL with lastSyncedLeaf watermark", async () => {
+      const wallet = await HolancWallet.random();
+      const mockFetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ notes: [] }),
+      });
+      globalThis.fetch = mockFetch;
+
+      await wallet.fetchIncomingNotes("http://localhost:3002");
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const calledUrl = mockFetch.mock.calls[0][0];
+      expect(calledUrl).toContain("after=-1");
+
+      // Second call should still use -1 since no notes were found
+      await wallet.fetchIncomingNotes("http://localhost:3002");
+      const secondUrl = mockFetch.mock.calls[1][0];
+      expect(secondUrl).toContain("after=-1");
+    });
+  });
 });
