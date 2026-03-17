@@ -5,9 +5,6 @@ use holanc_prover::{HolancProver, TransferParams, WithdrawParams, Groth16Proof};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
-/// Holds the last generated proof for submission.
-static mut LAST_PROOF: Option<Groth16Proof> = None;
-
 fn circuit_dir() -> PathBuf {
     std::env::var("HOLANC_CIRCUIT_DIR")
         .map(PathBuf::from)
@@ -23,6 +20,7 @@ fn main() {
     println!("Initializing Holanc wallet...");
     let mut wallet = Wallet::random();
     let prover = HolancProver::new(circuit_dir());
+    let mut last_proof: Option<Groth16Proof> = None;
     println!("Ready. Wallet owner: {}", hex::encode(&wallet.owner()[..8]));
     println!("Circuit dir: {}", circuit_dir().display());
     println!("Type 'help' for commands.\n");
@@ -51,9 +49,9 @@ fn main() {
             "deposit" | "d" => cmd_deposit(&mut wallet, &parts),
             "transfer" | "t" => cmd_transfer(&mut wallet, &parts),
             "withdraw" | "w" => cmd_withdraw(&mut wallet, &parts),
-            "prove-transfer" | "pt" => cmd_prove_transfer(&wallet, &prover, &parts),
-            "prove-withdraw" | "pw" => cmd_prove_withdraw(&wallet, &prover, &parts),
-            "submit" => cmd_submit(),
+            "prove-transfer" | "pt" => cmd_prove_transfer(&wallet, &prover, &parts, &mut last_proof),
+            "prove-withdraw" | "pw" => cmd_prove_withdraw(&wallet, &prover, &parts, &mut last_proof),
+            "submit" => cmd_submit(&last_proof),
 
             "balance" | "bal" => cmd_balance(&wallet),
             "notes" | "n" => cmd_notes(&wallet),
@@ -88,7 +86,10 @@ fn cmd_deposit(wallet: &mut Wallet, parts: &[&str]) {
     }
     match parts[1].parse::<u64>() {
         Ok(amount) if amount > 0 => {
-            let note = wallet.add_deposit_note(amount);
+            let note = match wallet.add_deposit_note(amount) {
+                Ok(n) => n,
+                Err(e) => { println!("  ✗ Deposit failed: {}", e); return; }
+            };
             let leaf_index = note.leaf_index.unwrap_or(0);
             println!(
                 "  ✓ Deposited {} lamports",
@@ -203,7 +204,7 @@ fn cmd_withdraw(wallet: &mut Wallet, parts: &[&str]) {
     }
 }
 
-fn cmd_prove_transfer(wallet: &Wallet, prover: &HolancProver, parts: &[&str]) {
+fn cmd_prove_transfer(wallet: &Wallet, prover: &HolancProver, parts: &[&str], last_proof: &mut Option<Groth16Proof>) {
     if parts.len() < 3 {
         println!("Usage: prove-transfer <recipient_hex> <amount> [fee]");
         return;
@@ -238,14 +239,13 @@ fn cmd_prove_transfer(wallet: &Wallet, prover: &HolancProver, parts: &[&str]) {
             println!("    Public signals: {}", proof.public_signals.len());
             println!("    π_A: {} elements", proof.pi_a.len());
             println!("    → Use 'submit' to send via relayer.");
-            // SAFETY: single-threaded CLI, only main thread accesses this
-            unsafe { LAST_PROOF = Some(proof); }
+            *last_proof = Some(proof);
         }
         Err(e) => println!("  ✗ Proof generation failed: {}", e),
     }
 }
 
-fn cmd_prove_withdraw(wallet: &Wallet, prover: &HolancProver, parts: &[&str]) {
+fn cmd_prove_withdraw(wallet: &Wallet, prover: &HolancProver, parts: &[&str], last_proof: &mut Option<Groth16Proof>) {
     if parts.len() < 2 {
         println!("Usage: prove-withdraw <amount> [fee]");
         return;
@@ -276,15 +276,14 @@ fn cmd_prove_withdraw(wallet: &Wallet, prover: &HolancProver, parts: &[&str]) {
             println!("    Public signals: {}", proof.public_signals.len());
             println!("    Exit value: {}", amount);
             println!("    → Use 'submit' to send via relayer.");
-            // SAFETY: single-threaded CLI, only main thread accesses this
-            unsafe { LAST_PROOF = Some(proof); }
+            *last_proof = Some(proof);
         }
         Err(e) => println!("  ✗ Proof generation failed: {}", e),
     }
 }
 
-fn cmd_submit() {
-    let proof = unsafe { LAST_PROOF.as_ref() };
+fn cmd_submit(last_proof: &Option<Groth16Proof>) {
+    let proof = last_proof.as_ref();
     match proof {
         None => {
             println!("  No proof ready. Run 'prove-transfer' or 'prove-withdraw' first.");
