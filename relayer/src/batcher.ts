@@ -40,10 +40,19 @@ export class RelayQueue {
 
   private loopHandle: ReturnType<typeof setInterval> | null = null;
 
-  constructor(rpcUrl: string, batchIntervalMs = 5_000, minBatchSize = 4) {
+  /** Maximum number of retries for a single transaction. */
+  private maxRetries: number;
+
+  constructor(
+    rpcUrl: string,
+    batchIntervalMs = 5_000,
+    minBatchSize = 4,
+    maxRetries = 3,
+  ) {
     this.connection = new Connection(rpcUrl, "confirmed");
     this.batchIntervalMs = batchIntervalMs;
     this.minBatchSize = minBatchSize;
+    this.maxRetries = maxRetries;
   }
 
   /** Enqueue a transaction for batched relay. Returns a tracking ID. */
@@ -131,27 +140,57 @@ export class RelayQueue {
       entry.status.state = "pending";
       entry.status.sentAt = Date.now();
 
+      const txBuffer = Buffer.from(entry.serializedTx, "base64");
+
+      // Validate that it's a plausible serialized transaction
       try {
-        const txBuffer = Buffer.from(entry.serializedTx, "base64");
-
-        // Validate that it's a plausible serialized transaction
         Transaction.from(txBuffer);
-
-        const signature = await sendAndConfirmRawTransaction(
-          this.connection,
-          txBuffer,
-          { commitment: "confirmed" },
-        );
-
-        entry.status.state = "confirmed";
-        entry.status.txSignature = signature;
-        console.log(`[batcher] confirmed ${entry.id} → ${signature}`);
       } catch (err: unknown) {
         entry.status.state = "failed";
-        entry.status.error =
-          err instanceof Error ? err.message : "Unknown error";
-        console.error(`[batcher] failed ${entry.id}: ${entry.status.error}`);
+        entry.status.error = "Invalid transaction data";
+        console.error(`[batcher] invalid tx ${entry.id}: ${entry.status.error}`);
+        return;
       }
+
+      // Retry with exponential backoff
+      let lastError = "";
+      for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+        try {
+          const signature = await sendAndConfirmRawTransaction(
+            this.connection,
+            txBuffer,
+            { commitment: "confirmed" },
+          );
+
+          entry.status.state = "confirmed";
+          entry.status.txSignature = signature;
+          console.log(`[batcher] confirmed ${entry.id} → ${signature}`);
+          return;
+        } catch (err: unknown) {
+          lastError = err instanceof Error ? err.message : "Unknown error";
+
+          // Don't retry on deterministic failures (invalid signature, etc.)
+          if (
+            lastError.includes("Signature verification failed") ||
+            lastError.includes("already been processed") ||
+            lastError.includes("Blockhash not found")
+          ) {
+            break;
+          }
+
+          if (attempt < this.maxRetries) {
+            const backoffMs = Math.min(1000 * 2 ** attempt, 8000);
+            console.warn(
+              `[batcher] attempt ${attempt + 1}/${this.maxRetries + 1} failed for ${entry.id}, retrying in ${backoffMs}ms`,
+            );
+            await sleep(backoffMs);
+          }
+        }
+      }
+
+      entry.status.state = "failed";
+      entry.status.error = lastError;
+      console.error(`[batcher] failed ${entry.id} after ${this.maxRetries + 1} attempts: ${lastError}`);
     });
 
     await Promise.allSettled(results);
