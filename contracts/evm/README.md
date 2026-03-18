@@ -1,66 +1,84 @@
-## Foundry
+## Holanc EVM Contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+This package contains the Solidity implementation of the Holanc protocol:
 
-Foundry consists of:
+- `HolancVerifier.sol` — Groth16 verifier on BN254 precompiles
+- `HolancNullifier.sol` — bitmap nullifier registry with epoch tracking
+- `HolancPool.sol` — ERC-20 privacy pool with incremental SHA-256 Merkle tree
+- `HolancBridge.sol` — cross-chain root sync and commitment locks
+- `HolancCompliance.sol` — oracle disclosures and wealth-proof attestations
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
+## Commands
 
 ### Build
 
-```shell
-$ forge build
+```sh
+forge build
 ```
 
 ### Test
 
-```shell
-$ forge test
+```sh
+forge test
 ```
 
 ### Format
 
-```shell
-$ forge fmt
+```sh
+forge fmt
 ```
 
-### Gas Snapshots
+## Deployment
 
-```shell
-$ forge snapshot
+The deployment script is `script/DeployHolanc.s.sol:DeployHolanc`.
+
+Required environment variables:
+
+```sh
+export PRIVATE_KEY=0x...
+export TOKEN_ADDRESS=0x...
 ```
 
-### Anvil
+Optional environment variables:
 
-```shell
-$ anvil
+```sh
+export FEE_COLLECTOR=0x...
+export LZ_ENDPOINT=0x...
+export LOCAL_CHAIN_ID=1
+export LOCAL_APP_ID=1
+export EPOCH_DURATION_BLOCKS=7200
+export PROOF_EXPIRY_SECONDS=86400
+export COMPLIANCE_MODE=1
 ```
 
-### Deploy
+`COMPLIANCE_MODE` values:
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+- `0` = `Permissionless`
+- `1` = `OptionalDisclosure`
+- `2` = `MandatoryDisclosure`
+
+Run the deployment:
+
+```sh
+forge script script/DeployHolanc.s.sol:DeployHolanc \
+	--rpc-url "$ETH_RPC_URL" \
+	--broadcast
 ```
 
-### Cast
+The script prints the deployed addresses in `.env`-friendly form:
 
-```shell
-$ cast <subcommand>
+```sh
+HOLANC_VERIFIER_ADDRESS=0x...
+HOLANC_NULLIFIER_ADDRESS=0x...
+HOLANC_POOL_ADDRESS=0x...
+HOLANC_BRIDGE_ADDRESS=0x...
+HOLANC_COMPLIANCE_ADDRESS=0x...
 ```
 
-### Help
+## Post-deploy
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+After deployment you still need to:
+
+1. initialize verification keys in `HolancVerifier`
+2. set trusted LayerZero peers on `HolancBridge`
+3. register compliance oracles if compliance mode requires them
