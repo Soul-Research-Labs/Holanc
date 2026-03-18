@@ -75,6 +75,25 @@ HOLANC_BRIDGE_ADDRESS=0x...
 HOLANC_COMPLIANCE_ADDRESS=0x...
 ```
 
+### Initialize verifier keys
+
+After deployment, load each `snarkjs` verification key into `HolancVerifier`:
+
+```sh
+export PRIVATE_KEY=0x...
+export HOLANC_VERIFIER_ADDRESS=0x...
+export CIRCUIT_TYPE=1
+export CIRCUIT_LABEL=transfer
+export VKEY_PATH=../circuits/build/transfer/transfer_vkey.json
+
+forge script script/InitializeVerifierKey.s.sol:InitializeVerifierKey \
+	--rpc-url "$ETH_RPC_URL" \
+	--broadcast
+```
+
+The script accepts either `HOLANC_VERIFIER_ADDRESS` or `VERIFIER_ADDRESS`.
+Use it once per circuit / verification key.
+
 ## Post-deploy
 
 After deployment you still need to:
