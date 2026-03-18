@@ -229,7 +229,14 @@ export class HolancProver {
     }
 
     const vkeyRaw = fs.readFileSync(vkeyPath, "utf-8");
-    const vkey = JSON.parse(vkeyRaw);
+    let vkey: any;
+    try {
+      vkey = JSON.parse(vkeyRaw);
+    } catch {
+      throw new Error(
+        `Failed to parse verification key at ${vkeyPath} — file may be corrupted.`,
+      );
+    }
 
     // Convert Groth16Proof back to snarkjs proof format
     const snarkjsProof = {
