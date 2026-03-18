@@ -20,6 +20,8 @@ pub enum ProverError {
     ProofGenerationFailed(String),
     #[error("Insufficient input value")]
     InsufficientValue,
+    #[error("Commitment/nullifier hash failed")]
+    HashFailed(#[from] holanc_primitives::poseidon::PoseidonError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
@@ -120,16 +122,18 @@ impl HolancProver {
 
         std::fs::write(&input_path, serde_json::to_string_pretty(input)?)?;
 
-        let to_str = |p: &std::path::Path| -> Result<&str, ProverError> {
-            p.to_str().ok_or_else(|| {
-                ProverError::ProofGenerationFailed(format!("non-UTF-8 path: {}", p.display()))
-            })
+        let to_str = |p: &std::path::Path| -> Result<String, ProverError> {
+            p.to_str()
+                .map(|s| s.to_owned())
+                .ok_or_else(|| {
+                    ProverError::ProofGenerationFailed(format!("non-UTF-8 path: {}", p.display()))
+                })
         };
 
         let output = Command::new("snarkjs")
             .args([
-                "groth16",
-                "fullprove",
+                "groth16".to_owned(),
+                "fullprove".to_owned(),
                 to_str(&input_path)?,
                 to_str(&wasm_path)?,
                 to_str(&zkey_path)?,

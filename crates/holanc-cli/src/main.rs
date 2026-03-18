@@ -98,7 +98,7 @@ fn cmd_deposit(wallet: &mut Wallet, parts: &[&str]) {
             println!("    Leaf index:  {}", leaf_index);
             println!(
                 "    Commitment:  {}",
-                hex::encode(&note.commitment().0[..16])
+                note.commitment().map(|c| hex::encode(&c.0[..16])).unwrap_or_else(|_| "<hash error>".into())
             );
             println!(
                 "    Merkle root: {}",
@@ -150,11 +150,11 @@ fn cmd_transfer(wallet: &mut Wallet, parts: &[&str]) {
             );
             println!(
                 "    Output[0]:    {} (to recipient)",
-                hex::encode(&prepared.output_notes[0].commitment().0[..8])
+                prepared.output_notes[0].commitment().map(|c| hex::encode(&c.0[..8])).unwrap_or_else(|_| "<hash error>".into())
             );
             println!(
                 "    Output[1]:    {} (change)",
-                hex::encode(&prepared.output_notes[1].commitment().0[..8])
+                prepared.output_notes[1].commitment().map(|c| hex::encode(&c.0[..8])).unwrap_or_else(|_| "<hash error>".into())
             );
             println!("    → Use 'prove transfer' to generate the ZK proof.");
             // Mark inputs spent locally
@@ -332,7 +332,7 @@ fn cmd_notes(wallet: &Wallet) {
             "  {:>6}  {:>12}  {}",
             note.leaf_index.map(|i| i.to_string()).unwrap_or("?".into()),
             note.value,
-            hex::encode(&note.commitment().0[..8])
+            note.commitment().map(|c| hex::encode(&c.0[..8])).unwrap_or_else(|_| "<hash error>".into())
         );
     }
 }

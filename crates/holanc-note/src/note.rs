@@ -6,6 +6,7 @@
 
 use holanc_primitives::commitment::{note_commitment, NoteCommitment};
 use holanc_primitives::nullifier::{nullifier_v1, nullifier_v2};
+use holanc_primitives::poseidon::PoseidonError;
 use serde::{Deserialize, Serialize};
 
 /// A shielded note in the privacy pool.
@@ -58,23 +59,20 @@ impl Note {
     }
 
     /// Compute the note commitment: Poseidon(owner, value, asset_id, blinding).
-    pub fn commitment(&self) -> NoteCommitment {
+    pub fn commitment(&self) -> Result<NoteCommitment, PoseidonError> {
         note_commitment(&self.owner, self.value, &self.asset_id, &self.blinding)
-            .expect("commitment computation should not fail")
     }
 
     /// Derive the V1 nullifier for this note given the spending key.
-    pub fn nullifier_v1(&self, spending_key: &[u8; 32]) -> [u8; 32] {
-        let cm = self.commitment();
+    pub fn nullifier_v1(&self, spending_key: &[u8; 32]) -> Result<[u8; 32], PoseidonError> {
+        let cm = self.commitment()?;
         nullifier_v1(spending_key, cm.as_bytes())
-            .expect("nullifier computation should not fail")
     }
 
     /// Derive the V2 (domain-separated) nullifier for cross-chain use.
-    pub fn nullifier_v2(&self, spending_key: &[u8; 32], chain_id: u64, app_id: u64) -> [u8; 32] {
-        let cm = self.commitment();
+    pub fn nullifier_v2(&self, spending_key: &[u8; 32], chain_id: u64, app_id: u64) -> Result<[u8; 32], PoseidonError> {
+        let cm = self.commitment()?;
         nullifier_v2(spending_key, cm.as_bytes(), chain_id, app_id)
-            .expect("nullifier computation should not fail")
     }
 }
 
@@ -91,8 +89,8 @@ mod tests {
     #[test]
     fn test_note_commitment() {
         let note = Note::with_blinding(test_owner(), 100, [0u8; 32], [42u8; 32]);
-        let cm1 = note.commitment();
-        let cm2 = note.commitment();
+        let cm1 = note.commitment().unwrap();
+        let cm2 = note.commitment().unwrap();
         assert_eq!(cm1, cm2);
     }
 
@@ -100,8 +98,8 @@ mod tests {
     fn test_note_nullifier_v1() {
         let note = Note::with_blinding(test_owner(), 100, [0u8; 32], [42u8; 32]);
         let sk = [1u8; 32];
-        let nf1 = note.nullifier_v1(&sk);
-        let nf2 = note.nullifier_v1(&sk);
+        let nf1 = note.nullifier_v1(&sk).unwrap();
+        let nf2 = note.nullifier_v1(&sk).unwrap();
         assert_eq!(nf1, nf2);
     }
 
@@ -109,8 +107,8 @@ mod tests {
     fn test_note_nullifier_v2_domain_separation() {
         let note = Note::with_blinding(test_owner(), 100, [0u8; 32], [42u8; 32]);
         let sk = [1u8; 32];
-        let nf_chain1 = note.nullifier_v2(&sk, 1, 0);
-        let nf_chain2 = note.nullifier_v2(&sk, 2, 0);
+        let nf_chain1 = note.nullifier_v2(&sk, 1, 0).unwrap();
+        let nf_chain2 = note.nullifier_v2(&sk, 2, 0).unwrap();
         assert_ne!(nf_chain1, nf_chain2);
     }
 
@@ -120,7 +118,7 @@ mod tests {
         let n2 = Note::new(test_owner(), 100, [0u8; 32]);
         // Random blinding means different commitments
         assert_ne!(n1.blinding, n2.blinding);
-        assert_ne!(n1.commitment(), n2.commitment());
+        assert_ne!(n1.commitment().unwrap(), n2.commitment().unwrap());
         assert!(!n1.spent);
         assert!(n1.leaf_index.is_none());
     }
@@ -128,8 +126,8 @@ mod tests {
     #[test]
     fn test_note_nullifier_v1_differs_for_different_keys() {
         let note = Note::with_blinding(test_owner(), 100, [0u8; 32], [42u8; 32]);
-        let nf1 = note.nullifier_v1(&[1u8; 32]);
-        let nf2 = note.nullifier_v1(&[2u8; 32]);
+        let nf1 = note.nullifier_v1(&[1u8; 32]).unwrap();
+        let nf2 = note.nullifier_v1(&[2u8; 32]).unwrap();
         assert_ne!(nf1, nf2);
     }
 }

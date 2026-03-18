@@ -22,6 +22,8 @@ pub enum WalletError {
     PersistenceFailed(String),
     #[error("Merkle tree is full — pool capacity exhausted")]
     TreeFull,
+    #[error("Commitment hash failed")]
+    CommitmentFailed,
 }
 
 /// Transaction record for wallet history.
@@ -97,7 +99,7 @@ impl Wallet {
     /// Add a note received from a deposit.
     pub fn add_deposit_note(&mut self, value: u64) -> Result<Note, WalletError> {
         let note = Note::new(*self.owner(), value, self.asset_id);
-        let commitment = note.commitment();
+        let commitment = note.commitment().map_err(|_| WalletError::CommitmentFailed)?;
         let (leaf_index, _root) = self
             .tree
             .append(*commitment.as_bytes())
@@ -359,7 +361,9 @@ impl Wallet {
         // Rebuild the Merkle tree from persisted notes
         for note in &wallet.notes {
             if let Some(_) = note.leaf_index {
-                let _ = wallet.tree.append(*note.commitment().as_bytes());
+                if let Ok(cm) = note.commitment() {
+                    let _ = wallet.tree.append(*cm.as_bytes());
+                }
             }
         }
 

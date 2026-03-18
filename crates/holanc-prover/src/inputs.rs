@@ -62,12 +62,12 @@ pub fn build_transfer_input(params: &TransferParams) -> Result<Value, ProverErro
 
         "merkle_root": bytes_to_decimal(&params.input_proofs[0].root),
         "nullifiers": [
-            bytes_to_decimal(&params.input_notes[0].nullifier_v1(&params.spending_key)),
-            bytes_to_decimal(&params.input_notes[1].nullifier_v1(&params.spending_key)),
+            bytes_to_decimal(&params.input_notes[0].nullifier_v1(&params.spending_key)?),
+            bytes_to_decimal(&params.input_notes[1].nullifier_v1(&params.spending_key)?),
         ],
         "output_commitments": [
-            bytes_to_decimal(params.output_notes[0].commitment().as_bytes()),
-            bytes_to_decimal(params.output_notes[1].commitment().as_bytes()),
+            bytes_to_decimal(params.output_notes[0].commitment()?.as_bytes()),
+            bytes_to_decimal(params.output_notes[1].commitment()?.as_bytes()),
         ],
         "fee": params.fee.to_string(),
     }))
@@ -129,12 +129,12 @@ pub fn build_withdraw_input(params: &WithdrawParams) -> Result<Value, ProverErro
 
         "merkle_root": bytes_to_decimal(&params.input_proofs[0].root),
         "nullifiers": [
-            bytes_to_decimal(&params.input_notes[0].nullifier_v1(&params.spending_key)),
-            bytes_to_decimal(&params.input_notes[1].nullifier_v1(&params.spending_key)),
+            bytes_to_decimal(&params.input_notes[0].nullifier_v1(&params.spending_key)?),
+            bytes_to_decimal(&params.input_notes[1].nullifier_v1(&params.spending_key)?),
         ],
         "output_commitments": [
-            bytes_to_decimal(params.output_notes[0].commitment().as_bytes()),
-            bytes_to_decimal(params.output_notes[1].commitment().as_bytes()),
+            bytes_to_decimal(params.output_notes[0].commitment()?.as_bytes()),
+            bytes_to_decimal(params.output_notes[1].commitment()?.as_bytes()),
         ],
         "exit_value": params.exit_value.to_string(),
         "fee": params.fee.to_string(),
