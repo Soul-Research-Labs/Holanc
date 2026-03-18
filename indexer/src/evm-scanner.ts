@@ -9,6 +9,31 @@
 
 import { NoteStore, IndexedNote } from "./store";
 
+type EthersNamespace = typeof import("ethers")["ethers"];
+
+type EvmEventLike = {
+  args?: [string, bigint, string];
+  transactionHash: string;
+  blockNumber: number;
+};
+
+type EvmContractLike = {
+  on(
+    eventName: string,
+    listener: (...args: unknown[]) => Promise<void>,
+  ): void;
+  queryFilter(filter: unknown, fromBlock: number, toBlock: number): Promise<EvmEventLike[]>;
+  removeAllListeners(): void;
+  filters: {
+    NewCommitment?: () => unknown;
+  };
+};
+
+async function loadEthers(): Promise<EthersNamespace> {
+  const mod = await import("ethers");
+  return mod.ethers;
+}
+
 const POOL_ABI = [
   "event NewCommitment(bytes32 indexed commitment, uint64 indexed leafIndex, bytes encryptedNote)",
   "event DepositEvent(address indexed depositor, bytes32 indexed commitment, uint64 leafIndex, uint256 amount)",
@@ -48,9 +73,13 @@ export class EvmNoteScanner {
   async start(): Promise<void> {
     this.running = true;
 
-    const { JsonRpcProvider, Contract } = await import("ethers");
-    const provider = new JsonRpcProvider(this.rpcUrl);
-    const pool = new Contract(this.poolAddress, POOL_ABI, provider);
+    const ethers = await loadEthers();
+    const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+    const pool = new ethers.Contract(
+      this.poolAddress,
+      POOL_ABI,
+      provider,
+    ) as EvmContractLike;
 
     // Resume from the last indexed EVM block or fall back to a catch-up window.
     const savedBlock = this.store.getLastEvmBlock();
@@ -69,12 +98,13 @@ export class EvmNoteScanner {
     // polls periodically — no additional web socket needed).
     pool.on(
       "NewCommitment",
-      async (
-        commitment: string,
-        leafIndex: bigint,
-        encryptedNote: string,
-        event: Record<string, unknown>,
-      ) => {
+      async (...args: unknown[]) => {
+        const [commitment, leafIndex, encryptedNote, event] = args as [
+          string,
+          bigint,
+          string,
+          { log?: { blockNumber?: number; transactionHash?: string } },
+        ];
         const blockNumber = (event.log as { blockNumber: number } | undefined)
           ?.blockNumber;
         const transactionHash =
@@ -92,13 +122,14 @@ export class EvmNoteScanner {
 
     pool.on(
       "DepositEvent",
-      async (
-        depositor: string,
-        commitment: string,
-        leafIndex: bigint,
-        amount: bigint,
-        event: Record<string, unknown>,
-      ) => {
+      async (...args: unknown[]) => {
+        const [depositor, commitment, leafIndex, amount, event] = args as [
+          string,
+          string,
+          bigint,
+          bigint,
+          { log?: { blockNumber?: number; transactionHash?: string } },
+        ];
         void depositor;
         void amount; // used only for existing NewCommitment indexing
         const blockNumber = (event.log as { blockNumber: number } | undefined)
@@ -117,7 +148,7 @@ export class EvmNoteScanner {
     );
 
     // Catch-up: scan historical blocks for any missed events.
-    await this._catchUp(provider, pool, this.lastBlock, BigInt(currentBlock));
+    await this._catchUp(pool, this.lastBlock, BigInt(currentBlock));
 
     // Keep alive — the pool.on listeners handle new events via ethers' built-in
     // polling.  We use a lightweight keepalive to detect provider disconnects.
@@ -130,7 +161,7 @@ export class EvmNoteScanner {
       }
     }
 
-    await pool.removeAllListeners();
+    pool.removeAllListeners();
   }
 
   stop(): void {
@@ -142,8 +173,7 @@ export class EvmNoteScanner {
   // --------------------------------------------------------------------------
 
   private async _catchUp(
-    provider: import("ethers").JsonRpcProvider,
-    pool: import("ethers").Contract,
+    pool: EvmContractLike,
     fromBlock: bigint,
     toBlock: bigint,
   ): Promise<void> {

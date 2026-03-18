@@ -1,5 +1,12 @@
 import crypto from "crypto";
 
+type EthersNamespace = typeof import("ethers")["ethers"];
+
+async function loadEthers(): Promise<EthersNamespace> {
+  const mod = await import("ethers");
+  return mod.ethers;
+}
+
 /** Status of a queued EVM relay request. */
 export interface EvmRelayStatus {
   id: string;
@@ -81,18 +88,18 @@ export class EvmRelayer {
 
   /** Estimate current EVM gas price. */
   async estimateFee(): Promise<EvmFeeEstimate> {
-    const { JsonRpcProvider } = await import("ethers");
-    const provider = new JsonRpcProvider(this.rpcUrl);
+    const ethers = await loadEthers();
+    const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
     const feeData = await provider.getFeeData();
 
-    const gasPrice = feeData.gasPrice ?? 0n;
+    const gasPrice = feeData.gasPrice;
     const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
 
-    const toGwei = (wei: bigint) => (Number(wei) / 1e9).toFixed(3);
-
     return {
-      gasPrice: gasPrice.toString(),
-      gasPriceGwei: toGwei(gasPrice),
+      gasPrice: gasPrice?.toString() ?? "0",
+      gasPriceGwei: gasPrice
+        ? ethers.utils.formatUnits(gasPrice, "gwei")
+        : "0",
       maxPriorityFeePerGas: maxPriorityFeePerGas
         ? maxPriorityFeePerGas.toString()
         : undefined,
@@ -112,11 +119,11 @@ export class EvmRelayer {
     entry.sentAt = Date.now();
 
     try {
-      const { JsonRpcProvider } = await import("ethers");
-      const provider = new JsonRpcProvider(this.rpcUrl);
+      const ethers = await loadEthers();
+      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
 
       // Broadcast the pre-signed transaction.
-      const txResponse = await provider.broadcastTransaction(signedTx);
+      const txResponse = await provider.sendTransaction(signedTx);
       entry.txHash = txResponse.hash;
 
       // Wait for one confirmation.

@@ -5,7 +5,7 @@
  * Solidity contracts on Ethereum mainnet (or any EVM-compatible chain).
  */
 
-import type { Signer, ContractTransactionResponse, Provider } from "ethers";
+import type { ContractTransaction, Signer, providers } from "ethers";
 import {
   ChainAdapter,
   AdapterConfig,
@@ -59,14 +59,24 @@ const ERC20_ABI = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyContract = any;
 
-async function loadEthers() {
+type EthersNamespace = typeof import("ethers")["ethers"];
+
+async function loadEthers(): Promise<EthersNamespace> {
   try {
-    return await import("ethers");
+    const mod = await import("ethers");
+    return mod.ethers;
   } catch {
     throw new Error(
       "ethers.js is required for EvmAdapter. Install it: npm install ethers@6",
     );
   }
+}
+
+function requireProvider(signer: Signer): providers.Provider {
+  if (!signer.provider) {
+    throw new Error("EvmAdapter signer must be connected to a provider");
+  }
+  return signer.provider;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,20 +151,20 @@ export class EvmAdapter implements ChainAdapter {
     }
 
     const commitmentBytes = this._hexToBytes32(params.commitment);
-    const tx: ContractTransactionResponse = await pool.deposit(
+    const tx = (await pool.deposit(
       params.amount,
       commitmentBytes,
       params.encryptedNote,
-    );
+    )) as ContractTransaction;
     const receipt = await tx.wait();
     if (!receipt) throw new Error("Transaction receipt not found");
 
     // Parse DepositEvent to get leaf index
-    const poolIface = new ethers.Interface(POOL_ABI);
+    const poolIface = new ethers.utils.Interface(POOL_ABI);
     let leafIndex = 0;
     for (const log of receipt.logs) {
       try {
-        const parsed = poolIface.parseLog(log);
+        const parsed = poolIface.parseLog(log as { topics: string[]; data: string });
         if (parsed?.name === "DepositEvent") {
           leafIndex = Number(parsed.args[0]);
           break;
@@ -181,7 +191,7 @@ export class EvmAdapter implements ChainAdapter {
 
     const { a, b, c } = formatProofForEvm(params.proof);
 
-    const tx: ContractTransactionResponse = await pool.transfer(
+    const tx = (await pool.transfer(
       this._hexToBytes32(params.merkleRoot),
       params.nullifiers.map((n) => this._hexToBytes32(n)),
       params.outputCommitments.map((cm) => this._hexToBytes32(cm)),
@@ -190,7 +200,7 @@ export class EvmAdapter implements ChainAdapter {
       a,
       b,
       c,
-    );
+    )) as ContractTransaction;
     await tx.wait();
 
     return {
@@ -210,7 +220,7 @@ export class EvmAdapter implements ChainAdapter {
 
     const { a, b, c } = formatProofForEvm(params.proof);
 
-    const tx: ContractTransactionResponse = await pool.withdraw(
+    const tx = (await pool.withdraw(
       this._hexToBytes32(params.merkleRoot),
       params.nullifiers.map((n) => this._hexToBytes32(n)),
       params.outputCommitments.map((cm) => this._hexToBytes32(cm)),
@@ -221,7 +231,7 @@ export class EvmAdapter implements ChainAdapter {
       a,
       b,
       c,
-    );
+    )) as ContractTransaction;
     await tx.wait();
 
     return {
@@ -240,7 +250,7 @@ export class EvmAdapter implements ChainAdapter {
     const pool = new ethers.Contract(
       this.config.poolAddress,
       POOL_ABI,
-      this.config.signer.provider as Provider,
+      requireProvider(this.config.signer),
     ) as AnyContract;
 
     const [root, nextLeafIndex, totalDeposited, isPaused, epoch, tokenAddr] =
@@ -272,7 +282,7 @@ export class EvmAdapter implements ChainAdapter {
     const registry = new ethers.Contract(
       this.config.nullifierAddress,
       NULLIFIER_ABI,
-      this.config.signer.provider as Provider,
+      requireProvider(this.config.signer),
     ) as AnyContract;
 
     // Page index 0 — production code should derive the correct page from the nullifier.
@@ -284,7 +294,7 @@ export class EvmAdapter implements ChainAdapter {
     const pool = new ethers.Contract(
       this.config.poolAddress,
       POOL_ABI,
-      this.config.signer.provider as Provider,
+      requireProvider(this.config.signer),
     ) as AnyContract;
     return pool.currentRoot();
   }
@@ -301,19 +311,25 @@ export class EvmAdapter implements ChainAdapter {
     const pool = new ethers.Contract(
       this.config.poolAddress,
       POOL_ABI,
-      this.config.signer.provider as Provider,
+      requireProvider(this.config.signer),
     ) as AnyContract;
 
     const filter = pool.filters.NewCommitment();
     const logs = await pool.queryFilter(filter, fromBlock, toBlock);
 
-    return logs.map((log: AnyContract) => ({
-      leafIndex: Number(log.args[0]),
-      commitment: log.args[1] as string,
-      encryptedNote: ethers.getBytes(log.args[2]) as Uint8Array,
-      txHash: log.transactionHash as string,
-      blockNumber: log.blockNumber as number,
-    }));
+    return logs.map(
+      (log: {
+        args: [bigint, string, string];
+        transactionHash: string;
+        blockNumber: number;
+      }) => ({
+        leafIndex: Number(log.args[0]),
+        commitment: log.args[1],
+        encryptedNote: Uint8Array.from(ethers.utils.arrayify(log.args[2])),
+        txHash: log.transactionHash,
+        blockNumber: log.blockNumber,
+      }),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -344,10 +360,10 @@ export class EvmAdapter implements ChainAdapter {
     );
 
     if (allowance < amount) {
-      const tx: ContractTransactionResponse = await token.approve(
+      const tx = (await token.approve(
         this.config.poolAddress,
         amount,
-      );
+      )) as ContractTransaction;
       await tx.wait();
     }
   }

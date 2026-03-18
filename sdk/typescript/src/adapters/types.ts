@@ -25,6 +25,7 @@ export interface DepositParams {
 
 /** Abstract transfer parameters. */
 export interface TransferParams {
+  amount: bigint;
   merkleRoot: string;
   nullifiers: [string, string];
   outputCommitments: [string, string];

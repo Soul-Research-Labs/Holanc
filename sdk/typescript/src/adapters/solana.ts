@@ -25,6 +25,8 @@ export interface SolanaAdapterConfig extends AdapterConfig {
   payer: Keypair;
   /** Optional existing wallet; a random one will be created if omitted. */
   wallet?: HolancWallet;
+  /** Optional indexer HTTP base URL used for commitment lookups. */
+  indexerUrl?: string;
   /** Token mint address (Solana SPL token). */
   tokenMint: string;
   /** Optional secondary RPC endpoints for failover. */
@@ -46,25 +48,32 @@ export class SolanaAdapter implements ChainAdapter {
 
   private client: HolancClient;
   private config: SolanaAdapterConfig;
+  private wallet: HolancWallet;
 
-  private constructor(client: HolancClient, config: SolanaAdapterConfig) {
+  private constructor(
+    client: HolancClient,
+    config: SolanaAdapterConfig,
+    wallet: HolancWallet,
+  ) {
     this.client = client;
     this.config = config;
+    this.wallet = wallet;
   }
 
   /** Create a SolanaAdapter from configuration. */
   static async create(config: SolanaAdapterConfig): Promise<SolanaAdapter> {
+    const wallet = config.wallet ?? (await HolancWallet.random());
     const client =
       config.failoverEndpoints && config.failoverEndpoints.length > 0
         ? await HolancClient.createWithFailover(
             [config.rpcUrl, ...config.failoverEndpoints],
             config.payer,
             config.failoverConfig,
-            config.wallet,
+            wallet,
           )
-        : await HolancClient.create(config.rpcUrl, config.payer, config.wallet);
+        : await HolancClient.create(config.rpcUrl, config.payer, wallet);
 
-    return new SolanaAdapter(client, config);
+    return new SolanaAdapter(client, config, wallet);
   }
 
   // -------------------------------------------------------------------------
@@ -96,11 +105,15 @@ export class SolanaAdapter implements ChainAdapter {
     // Transfer on Solana uses destination owner hash derived from the first output commitment.
     // The recipient's owner hash is embedded in the outputCommitments[0].
     const recipientOwnerHash = params.outputCommitments[0];
+    const amount = params.amount;
+
+    if (amount < 0n) {
+      throw new Error("transfer amount must be non-negative");
+    }
 
     return this.client.transfer(
       recipientOwnerHash,
-      // Amount is derived from the proof; pass 0n as the client resolves from notes.
-      0n,
+      amount,
       tokenMint,
       params.fee,
       feeCollector,
@@ -128,9 +141,9 @@ export class SolanaAdapter implements ChainAdapter {
 
     return this.client.withdraw(
       params.exitAmount,
-      params.fee,
       tokenMint,
       recipient,
+      params.fee,
       feeCollector,
       verificationKey,
       nullifierManager,
@@ -158,7 +171,10 @@ export class SolanaAdapter implements ChainAdapter {
   }
 
   async isNullifierSpent(nullifier: string): Promise<boolean> {
-    return this.client.isNullifierSpent(nullifier);
+    void nullifier;
+    throw new Error(
+      "SolanaAdapter.isNullifierSpent is not implemented in HolancClient yet",
+    );
   }
 
   async getMerkleRoot(): Promise<string> {
@@ -176,20 +192,49 @@ export class SolanaAdapter implements ChainAdapter {
     fromBlock: number,
     toBlock: number,
   ): Promise<CommitmentEvent[]> {
-    // Solana uses slot numbers rather than block numbers.
-    // Delegate to the client's fetchIncomingNotes which decodes on-chain logs.
-    const notes = await this.client.fetchIncomingNotes(fromBlock, toBlock);
-    return notes.map((n) => ({
-      leafIndex: n.leafIndex ?? 0,
-      commitment: n.commitment,
-      encryptedNote: new Uint8Array(), // encrypted note is decoded by the wallet
-      txHash: "",
-      blockNumber: n.leafIndex ?? 0,
+    const indexerUrl =
+      this.config.indexerUrl ??
+      process.env.INDEXER_URL ??
+      process.env.NEXT_PUBLIC_INDEXER_URL;
+
+    if (!indexerUrl) {
+      throw new Error(
+        "SolanaAdapter.getCommitments requires indexerUrl or INDEXER_URL",
+      );
+    }
+
+    const url = new URL(`/notes?from=${fromBlock}&to=${toBlock}`, indexerUrl);
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      throw new Error(`Indexer returned ${res.status}: ${await res.text()}`);
+    }
+
+    const body = (await res.json()) as {
+      notes: Array<{
+        commitment: string;
+        leafIndex: number;
+        encryptedNote: string;
+        txSignature: string;
+        slot: number;
+      }>;
+    };
+
+    return body.notes.map((note) => ({
+      leafIndex: note.leafIndex,
+      commitment: note.commitment,
+      encryptedNote: Uint8Array.from(Buffer.from(note.encryptedNote, "hex")),
+      txHash: note.txSignature,
+      blockNumber: note.slot,
     }));
   }
 
   /** Access the underlying HolancClient for Solana-specific operations. */
   get holancClient(): HolancClient {
     return this.client;
+  }
+
+  /** Access the underlying HolancWallet used by the adapter. */
+  get holancWallet(): HolancWallet {
+    return this.wallet;
   }
 }
