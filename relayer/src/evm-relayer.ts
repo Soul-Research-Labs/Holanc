@@ -97,9 +97,7 @@ export class EvmRelayer {
 
     return {
       gasPrice: gasPrice?.toString() ?? "0",
-      gasPriceGwei: gasPrice
-        ? ethers.utils.formatUnits(gasPrice, "gwei")
-        : "0",
+      gasPriceGwei: gasPrice ? ethers.utils.formatUnits(gasPrice, "gwei") : "0",
       maxPriorityFeePerGas: maxPriorityFeePerGas
         ? maxPriorityFeePerGas.toString()
         : undefined,

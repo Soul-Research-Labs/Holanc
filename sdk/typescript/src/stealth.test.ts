@@ -6,9 +6,10 @@ import {
 } from "./stealth";
 
 describe("stealth addresses", () => {
+  const recipientViewingKey = "cd".repeat(32);
   const recipientMeta: StealthMetaAddress = {
     spendingPubkey: "ab".repeat(32),
-    viewingPubkey: "cd".repeat(32),
+    viewingPubkey: [recipientViewingKey, "ef".repeat(32)],
   };
 
   describe("stealthSend", () => {
@@ -16,7 +17,9 @@ describe("stealth addresses", () => {
       const result = await stealthSend(recipientMeta);
       expect(result.stealthOwner).toHaveLength(64);
       expect(result.sharedSecret).toHaveLength(64);
-      expect(result.ephemeralPubkey).toHaveLength(64);
+      expect(result.ephemeralPubkey).toHaveLength(2);
+      expect(result.ephemeralPubkey[0]).toHaveLength(64);
+      expect(result.ephemeralPubkey[1]).toHaveLength(64);
       expect(result.ephemeralKey).toHaveLength(64);
     });
 
@@ -35,7 +38,7 @@ describe("stealth addresses", () => {
       // This won't produce a cryptographic match unless we use the actual
       // key derivation. We test the API shape here.
       const scanResult = await stealthScan(
-        recipientMeta.viewingPubkey,
+        recipientViewingKey,
         recipientMeta.spendingPubkey,
         sendResult.ephemeralPubkey,
         sendResult.stealthOwner,
@@ -49,12 +52,13 @@ describe("stealth addresses", () => {
 
     it("rejects non-matching stealth address", async () => {
       const sendResult = await stealthSend(recipientMeta);
+      const wrongViewingKey = "ee".repeat(32);
       const wrongMeta: StealthMetaAddress = {
         spendingPubkey: "ff".repeat(32),
-        viewingPubkey: "ee".repeat(32),
+        viewingPubkey: [wrongViewingKey, "11".repeat(32)],
       };
       const scanResult = await stealthScan(
-        wrongMeta.viewingPubkey,
+        wrongViewingKey,
         wrongMeta.spendingPubkey,
         sendResult.ephemeralPubkey,
         sendResult.stealthOwner,

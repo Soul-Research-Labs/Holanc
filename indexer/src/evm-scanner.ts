@@ -18,11 +18,12 @@ type EvmEventLike = {
 };
 
 type EvmContractLike = {
-  on(
-    eventName: string,
-    listener: (...args: unknown[]) => Promise<void>,
-  ): void;
-  queryFilter(filter: unknown, fromBlock: number, toBlock: number): Promise<EvmEventLike[]>;
+  on(eventName: string, listener: (...args: unknown[]) => Promise<void>): void;
+  queryFilter(
+    filter: unknown,
+    fromBlock: number,
+    toBlock: number,
+  ): Promise<EvmEventLike[]>;
   removeAllListeners(): void;
   filters: {
     NewCommitment?: () => unknown;
@@ -96,56 +97,50 @@ export class EvmNoteScanner {
 
     // Try to subscribe via WebSocket-compatible polling (ethers JsonRpcProvider
     // polls periodically — no additional web socket needed).
-    pool.on(
-      "NewCommitment",
-      async (...args: unknown[]) => {
-        const [commitment, leafIndex, encryptedNote, event] = args as [
-          string,
-          bigint,
-          string,
-          { log?: { blockNumber?: number; transactionHash?: string } },
-        ];
-        const blockNumber = (event.log as { blockNumber: number } | undefined)
-          ?.blockNumber;
-        const transactionHash =
-          (event.log as { transactionHash: string } | undefined)
-            ?.transactionHash ?? "0x";
-        await this._handleNewCommitment(
-          commitment,
-          Number(leafIndex),
-          encryptedNote,
-          transactionHash,
-          blockNumber ?? 0,
-        );
-      },
-    );
+    pool.on("NewCommitment", async (...args: unknown[]) => {
+      const [commitment, leafIndex, encryptedNote, event] = args as [
+        string,
+        bigint,
+        string,
+        { log?: { blockNumber?: number; transactionHash?: string } },
+      ];
+      const blockNumber = (event.log as { blockNumber: number } | undefined)
+        ?.blockNumber;
+      const transactionHash =
+        (event.log as { transactionHash: string } | undefined)
+          ?.transactionHash ?? "0x";
+      await this._handleNewCommitment(
+        commitment,
+        Number(leafIndex),
+        encryptedNote,
+        transactionHash,
+        blockNumber ?? 0,
+      );
+    });
 
-    pool.on(
-      "DepositEvent",
-      async (...args: unknown[]) => {
-        const [depositor, commitment, leafIndex, amount, event] = args as [
-          string,
-          string,
-          bigint,
-          bigint,
-          { log?: { blockNumber?: number; transactionHash?: string } },
-        ];
-        void depositor;
-        void amount; // used only for existing NewCommitment indexing
-        const blockNumber = (event.log as { blockNumber: number } | undefined)
-          ?.blockNumber;
-        const transactionHash =
-          (event.log as { transactionHash: string } | undefined)
-            ?.transactionHash ?? "0x";
-        await this._handleNewCommitment(
-          commitment,
-          Number(leafIndex),
-          "",
-          transactionHash,
-          blockNumber ?? 0,
-        );
-      },
-    );
+    pool.on("DepositEvent", async (...args: unknown[]) => {
+      const [depositor, commitment, leafIndex, amount, event] = args as [
+        string,
+        string,
+        bigint,
+        bigint,
+        { log?: { blockNumber?: number; transactionHash?: string } },
+      ];
+      void depositor;
+      void amount; // used only for existing NewCommitment indexing
+      const blockNumber = (event.log as { blockNumber: number } | undefined)
+        ?.blockNumber;
+      const transactionHash =
+        (event.log as { transactionHash: string } | undefined)
+          ?.transactionHash ?? "0x";
+      await this._handleNewCommitment(
+        commitment,
+        Number(leafIndex),
+        "",
+        transactionHash,
+        blockNumber ?? 0,
+      );
+    });
 
     // Catch-up: scan historical blocks for any missed events.
     await this._catchUp(pool, this.lastBlock, BigInt(currentBlock));

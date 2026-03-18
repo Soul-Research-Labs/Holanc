@@ -102,16 +102,16 @@ export async function encryptNote(
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    aesKey as BufferSource,
+    aesKey,
     "AES-GCM",
     false,
     ["encrypt"],
   );
 
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv as BufferSource, tagLength: TAG_LENGTH * 8 },
+    { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
     cryptoKey,
-    ptBytes as BufferSource,
+    ptBytes,
   );
 
   // Concatenate IV || ciphertext+tag
@@ -161,16 +161,16 @@ export async function decryptNote(
 
     const cryptoKey = await crypto.subtle.importKey(
       "raw",
-      aesKey as BufferSource,
+      aesKey,
       "AES-GCM",
       false,
       ["decrypt"],
     );
 
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: iv as BufferSource, tagLength: TAG_LENGTH * 8 },
+      { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
       cryptoKey,
-      ct as BufferSource,
+      ct,
     );
 
     return decodePlaintext(new Uint8Array(decrypted));
@@ -213,7 +213,7 @@ function hexToBytes32(hex: string): Uint8Array {
 async function hkdfDeriveKey(ikm: Uint8Array): Promise<Uint8Array> {
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    ikm as BufferSource,
+    ikm,
     "HKDF",
     false,
     ["deriveBits"],
@@ -223,8 +223,8 @@ async function hkdfDeriveKey(ikm: Uint8Array): Promise<Uint8Array> {
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(32) as BufferSource, // zero salt for deterministic testing
-      info: HKDF_INFO as BufferSource,
+      salt: new Uint8Array(32), // zero salt for deterministic testing
+      info: HKDF_INFO,
     },
     baseKey,
     256,

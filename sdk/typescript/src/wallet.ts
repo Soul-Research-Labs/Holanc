@@ -8,7 +8,7 @@ import {
 } from "./poseidon";
 import { decryptNote, type EncryptedNote } from "./encryption";
 
-interface TxRecord {
+export interface TxRecord {
   kind: "deposit" | "send" | "withdraw";
   amount: bigint;
   timestamp: number;
@@ -339,13 +339,13 @@ export class HolancWallet {
       throw new Error(`Indexer returned ${res.status}: ${await res.text()}`);
     }
 
-    const body: {
+    const body = (await res.json()) as {
       notes: Array<{
         commitment: string;
         leafIndex: number;
         encryptedNote: string;
       }>;
-    } = await res.json();
+    };
 
     if (!body.notes || body.notes.length === 0) return 0;
 

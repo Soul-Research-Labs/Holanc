@@ -76,21 +76,17 @@ describe("FailoverConnection", () => {
         maxFailures: 2,
       });
 
-      // Fail once
-      let failOnce = true;
-      await fc.exec(async () => {
-        if (failOnce) {
-          failOnce = false;
+      await expect(
+        fc.exec(async () => {
           throw new Error("transient");
-        }
-        return "ok";
-      });
+        }),
+      ).rejects.toThrow("All 1 RPC endpoints failed");
 
-      // Endpoint should be healthy (failure was on a single-endpoint setup,
-      // so it retries the same one — but since there's only 1, it should still work)
-      const s = fc.status();
-      // After success, failures should be reset
-      expect(s[0].failures).toBe(0);
+      expect(fc.status()[0].failures).toBe(1);
+
+      const result = await fc.exec(async () => "ok");
+      expect(result).toBe("ok");
+      expect(fc.status()[0].failures).toBe(0);
     });
   });
 

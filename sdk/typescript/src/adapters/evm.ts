@@ -164,7 +164,9 @@ export class EvmAdapter implements ChainAdapter {
     let leafIndex = 0;
     for (const log of receipt.logs) {
       try {
-        const parsed = poolIface.parseLog(log as { topics: string[]; data: string });
+        const parsed = poolIface.parseLog(
+          log as { topics: string[]; data: string },
+        );
         if (parsed?.name === "DepositEvent") {
           leafIndex = Number(parsed.args[0]);
           break;
