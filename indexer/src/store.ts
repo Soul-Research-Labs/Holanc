@@ -166,6 +166,23 @@ export class NoteStore {
       .run(sig);
   }
 
+  /** Get last processed EVM block number (for EVM scanner resume). */
+  getLastEvmBlock(): number | null {
+    const row = this.db
+      .prepare("SELECT value FROM metadata WHERE key = 'last_evm_block'")
+      .get() as { value: string } | undefined;
+    return row?.value != null ? parseInt(row.value, 10) : null;
+  }
+
+  /** Persist last processed EVM block number. */
+  setLastEvmBlock(blockNumber: number): void {
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES ('last_evm_block', ?)",
+      )
+      .run(String(blockNumber));
+  }
+
   /** Close the database. */
   close(): void {
     this.db.close();

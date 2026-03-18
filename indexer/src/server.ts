@@ -2,6 +2,7 @@ import http from "node:http";
 import { NoteStore, IndexedNote } from "./store";
 import { ReplicatedNoteStore } from "./replicated-store";
 import { NoteScanner } from "./scanner";
+import { EvmNoteScanner } from "./evm-scanner";
 
 const ALLOWED_ORIGINS = process.env.CORS_ORIGIN || "*";
 
@@ -67,6 +68,7 @@ function handleStatus(store: NoteStore, res: http.ServerResponse): void {
     noteCount: store.count(),
     maxLeafIndex: store.maxLeafIndex(),
     lastSignature: store.getLastSignature(),
+    lastEvmBlock: store.getLastEvmBlock(),
   });
 }
 
@@ -153,6 +155,10 @@ if (require.main === module) {
     ? process.env.INDEXER_REPLICA_PATHS.split(",").map((p) => p.trim())
     : [];
 
+  // EVM scanner config (optional — only starts when both vars are set)
+  const EVM_RPC_URL = process.env.EVM_RPC_URL || "";
+  const HOLANC_POOL_ADDRESS = process.env.HOLANC_POOL_ADDRESS || "";
+
   // Use replicated store when replica paths are configured for HA reads
   const store =
     REPLICA_PATHS.length > 0
@@ -161,9 +167,30 @@ if (require.main === module) {
   const scanner = new NoteScanner(RPC_URL, store as NoteStore);
   const server = createServer(store as NoteStore, PORT);
 
+  // Start EVM scanner if configured
+  let evmScanner: EvmNoteScanner | null = null;
+  if (EVM_RPC_URL && HOLANC_POOL_ADDRESS) {
+    evmScanner = new EvmNoteScanner(
+      EVM_RPC_URL,
+      HOLANC_POOL_ADDRESS,
+      store as NoteStore,
+    );
+    evmScanner.start().catch((err) => {
+      console.error("[evm-scanner] fatal:", err);
+    });
+    console.log(
+      `[indexer] EVM scanner started for pool ${HOLANC_POOL_ADDRESS}`,
+    );
+  } else {
+    console.log(
+      "[indexer] EVM scanner not configured (set EVM_RPC_URL and HOLANC_POOL_ADDRESS to enable)",
+    );
+  }
+
   process.on("SIGINT", () => {
     console.log("\n[indexer] shutting down...");
     scanner.stop();
+    evmScanner?.stop();
     server.close();
     store.close();
     process.exit(0);
