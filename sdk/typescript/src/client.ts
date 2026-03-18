@@ -598,6 +598,21 @@ export class HolancClient {
   }
 
   private serializeProof(proof: any): Buffer {
+    // Validate Groth16 proof structure before serialization.
+    if (
+      !Array.isArray(proof.piA) ||
+      proof.piA.length < 2 ||
+      !Array.isArray(proof.piB) ||
+      proof.piB.length < 2 ||
+      !proof.piB.every((p: any) => Array.isArray(p) && p.length >= 2) ||
+      !Array.isArray(proof.piC) ||
+      proof.piC.length < 2
+    ) {
+      throw new Error(
+        "Invalid proof structure: expected piA[2+], piB[2+][2+], piC[2+]",
+      );
+    }
+
     // Serialize Groth16 proof to fixed-size bytes: pi_a (64) + pi_b (128) + pi_c (64) = 256
     // Field elements are encoded as 32-byte big-endian to match BN254 convention.
     const parts: Buffer[] = [];
