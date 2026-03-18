@@ -30,7 +30,7 @@ export class FeeEstimator {
   /** Cache duration for priority fee lookups. */
   private cacheDurationMs = 30_000;
   /** Timeout for individual RPC calls (ms). */
-  private rpcTimeoutMs = 5_000;
+  private rpcTimeoutMs = 1_000;
   private cachedPriorityFee: number | null = null;
   private cacheTimestamp = 0;
 

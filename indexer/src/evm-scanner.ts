@@ -9,7 +9,7 @@
 
 import { NoteStore, IndexedNote } from "./store";
 
-type EthersNamespace = typeof import("ethers")["ethers"];
+type EthersNamespace = typeof import("ethers");
 
 type EvmEventLike = {
   args?: [string, bigint, string];
@@ -32,7 +32,7 @@ type EvmContractLike = {
 
 async function loadEthers(): Promise<EthersNamespace> {
   const mod = await import("ethers");
-  return mod.ethers;
+  return mod;
 }
 
 const POOL_ABI = [
@@ -75,7 +75,7 @@ export class EvmNoteScanner {
     this.running = true;
 
     const ethers = await loadEthers();
-    const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+    const provider = new ethers.JsonRpcProvider(this.rpcUrl);
     const pool = new ethers.Contract(
       this.poolAddress,
       POOL_ABI,

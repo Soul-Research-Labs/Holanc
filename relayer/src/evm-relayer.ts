@@ -1,10 +1,10 @@
 import crypto from "crypto";
 
-type EthersNamespace = typeof import("ethers")["ethers"];
+type EthersNamespace = typeof import("ethers");
 
 async function loadEthers(): Promise<EthersNamespace> {
   const mod = await import("ethers");
-  return mod.ethers;
+  return mod;
 }
 
 /** Status of a queued EVM relay request. */
@@ -89,7 +89,7 @@ export class EvmRelayer {
   /** Estimate current EVM gas price. */
   async estimateFee(): Promise<EvmFeeEstimate> {
     const ethers = await loadEthers();
-    const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+    const provider = new ethers.JsonRpcProvider(this.rpcUrl);
     const feeData = await provider.getFeeData();
 
     const gasPrice = feeData.gasPrice;
@@ -97,7 +97,7 @@ export class EvmRelayer {
 
     return {
       gasPrice: gasPrice?.toString() ?? "0",
-      gasPriceGwei: gasPrice ? ethers.utils.formatUnits(gasPrice, "gwei") : "0",
+      gasPriceGwei: gasPrice ? ethers.formatUnits(gasPrice, "gwei") : "0",
       maxPriorityFeePerGas: maxPriorityFeePerGas
         ? maxPriorityFeePerGas.toString()
         : undefined,
@@ -118,10 +118,10 @@ export class EvmRelayer {
 
     try {
       const ethers = await loadEthers();
-      const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
+      const provider = new ethers.JsonRpcProvider(this.rpcUrl);
 
       // Broadcast the pre-signed transaction.
-      const txResponse = await provider.sendTransaction(signedTx);
+      const txResponse = await provider.broadcastTransaction(signedTx);
       entry.txHash = txResponse.hash;
 
       // Wait for one confirmation.
