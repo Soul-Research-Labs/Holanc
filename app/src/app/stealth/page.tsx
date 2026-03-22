@@ -2,15 +2,16 @@
 
 import { Header } from "@/components/Header";
 import { PageShell, AmountInput, ProofStatus } from "@/components/shared";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
 import { useHolanc } from "@/hooks/useHolanc";
+import { useChain } from "@/hooks/useChain";
 
 type StealthMode = "send" | "scan";
 
 export default function StealthPage() {
-  const { connected, publicKey } = useWallet();
+  const { nativeCurrency } = useChain();
   const holanc = useHolanc();
+  const connected = holanc.connected;
   const [mode, setMode] = useState<StealthMode>("send");
   const [metaAddress, setMetaAddress] = useState("");
   const [amount, setAmount] = useState("");
@@ -111,7 +112,11 @@ export default function StealthPage() {
               </p>
             </div>
 
-            <AmountInput value={amount} onChange={setAmount} />
+            <AmountInput
+              value={amount}
+              onChange={setAmount}
+              token={nativeCurrency}
+            />
             <ProofStatus status={proofStatus} message={proofMessage} />
 
             <button
@@ -133,9 +138,9 @@ export default function StealthPage() {
               key will be used locally to check for payments addressed to you.
             </p>
 
-            {publicKey && (
+            {connected && holanc.publicKey && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs font-mono dark:border-gray-700 dark:bg-gray-800">
-                Scanning as: {publicKey.toBase58().slice(0, 16)}…
+                Scanning as: {String(holanc.publicKey).slice(0, 16)}…
               </div>
             )}
 

@@ -90,14 +90,14 @@ tests/                     Integration, circuit, and E2E tests
 
 ## Prerequisites
 
-| Tool        | Version | Purpose                      |
-|-------------|---------|------------------------------|
-| Rust        | ≥ 1.75  | Workspace crates + programs  |
-| Solana CLI  | ≥ 2.1   | Validator, deploy, keypairs  |
-| Anchor      | ≥ 0.32  | Program build & test         |
-| Node.js     | ≥ 18    | SDK, relayer, indexer, app   |
-| Circom      | ≥ 2.2   | Circuit compilation          |
-| snarkjs     | ≥ 0.7   | Proving key gen & proving    |
+| Tool       | Version | Purpose                     |
+| ---------- | ------- | --------------------------- |
+| Rust       | ≥ 1.75  | Workspace crates + programs |
+| Solana CLI | ≥ 2.1   | Validator, deploy, keypairs |
+| Anchor     | ≥ 0.32  | Program build & test        |
+| Node.js    | ≥ 18    | SDK, relayer, indexer, app  |
+| Circom     | ≥ 2.2   | Circuit compilation         |
+| snarkjs    | ≥ 0.7   | Proving key gen & proving   |
 
 ## Quick Start
 
@@ -132,7 +132,7 @@ cargo run --bin holanc-cli
 ## Cryptographic Primitives
 
 | Component             | Construction                                             |
-|-----------------------|----------------------------------------------------------|
+| --------------------- | -------------------------------------------------------- |
 | Hash function         | Poseidon (BN254, width=3, rate=2, circomlib-compatible)  |
 | Note commitment       | `Poseidon(owner, value, asset_id, blinding)`             |
 | Nullifier (V1)        | `Poseidon(spending_key, commitment)`                     |
@@ -140,23 +140,23 @@ cargo run --bin holanc-cli
 | Merkle tree           | Incremental Poseidon tree (depth 20) + on-chain SHA-256  |
 | Proving system        | Groth16 on BN254                                         |
 | On-chain verification | Solana `alt_bn128` syscalls (add, mul, pairing)          |
-| Note encryption       | ECDH (BabyJubJub) + HKDF-SHA256 + AES-256-GCM           |
+| Note encryption       | ECDH (BabyJubJub) + HKDF-SHA256 + AES-256-GCM            |
 | Key derivation        | BIP-39 mnemonic → spending key → viewing key (Poseidon)  |
 | Stealth addresses     | Ephemeral key exchange → Poseidon-derived one-time owner |
 
 ## Circuit Reference
 
-| Circuit            | Inputs | Outputs | Key Constraints |
-|--------------------|--------|---------|-----------------|
-| `deposit`          | 0      | 1       | Commitment preimage validity |
+| Circuit            | Inputs | Outputs | Key Constraints                                                          |
+| ------------------ | ------ | ------- | ------------------------------------------------------------------------ |
+| `deposit`          | 0      | 1       | Commitment preimage validity                                             |
 | `transfer`         | 2      | 2       | Merkle inclusion, nullifiers, value conservation: `Σ(in) = Σ(out) + fee` |
-| `withdraw`         | 2      | 2       | Same as transfer + public `exit_value`: `Σ(in) = Σ(out) + exit + fee` |
-| `transfer_v2`      | 2      | 2       | Domain-separated nullifiers for cross-chain |
-| `withdraw_v2`      | 2      | 2       | V2 nullifiers + public exit |
-| `stealth_transfer` | 2      | 2       | Ephemeral key derivation + transfer constraints |
-| `wealth_proof`     | 0–8    | 0       | Balance threshold: `Σ(owned values) ≥ threshold` |
-| `transfer_4x4`     | 0–4    | 0–4     | Boolean selectors, variable I/O, cross-asset consistency |
-| `withdraw_4x4`     | 0–4    | 0–4     | Variable I/O + public exit |
+| `withdraw`         | 2      | 2       | Same as transfer + public `exit_value`: `Σ(in) = Σ(out) + exit + fee`    |
+| `transfer_v2`      | 2      | 2       | Domain-separated nullifiers for cross-chain                              |
+| `withdraw_v2`      | 2      | 2       | V2 nullifiers + public exit                                              |
+| `stealth_transfer` | 2      | 2       | Ephemeral key derivation + transfer constraints                          |
+| `wealth_proof`     | 0–8    | 0       | Balance threshold: `Σ(owned values) ≥ threshold`                         |
+| `transfer_4x4`     | 0–4    | 0–4     | Boolean selectors, variable I/O, cross-asset consistency                 |
+| `withdraw_4x4`     | 0–4    | 0–4     | Variable I/O + public exit                                               |
 
 ## Services
 
@@ -194,14 +194,14 @@ Starts: `solana-test-validator` → `relayer` (3001) → `indexer` (3002) → `a
 
 ## Testing
 
-| Runner            | Command                         | Scope                                                  |
-|-------------------|----------------------------------|--------------------------------------------------------|
-| Cargo             | `cargo test`                    | Primitives, note, tree, client, prover, CLI            |
+| Runner            | Command                         | Scope                                                        |
+| ----------------- | ------------------------------- | ------------------------------------------------------------ |
+| Cargo             | `cargo test`                    | Primitives, note, tree, client, prover, CLI                  |
 | Anchor (ts-mocha) | `anchor test`                   | On-chain programs, CPI flows, full deposit→transfer→withdraw |
-| Jest (SDK)        | `cd sdk/typescript && npm test` | Poseidon, encryption, wallet, stealth, RPC failover    |
-| Jest (Relayer)    | `cd relayer && npm test`        | Batcher retry, fees, jitter, rate limiting             |
-| Jest (Indexer)    | `cd indexer && npm test`        | Store operations, replication, WAL mode                |
-| Next.js           | `cd app && npm run build`       | Type-check + build all 7 pages                         |
+| Jest (SDK)        | `cd sdk/typescript && npm test` | Poseidon, encryption, wallet, stealth, RPC failover          |
+| Jest (Relayer)    | `cd relayer && npm test`        | Batcher retry, fees, jitter, rate limiting                   |
+| Jest (Indexer)    | `cd indexer && npm test`        | Store operations, replication, WAL mode                      |
+| Next.js           | `cd app && npm run build`       | Type-check + build all 7 pages                               |
 
 ## Environment Variables
 
@@ -215,17 +215,17 @@ Key variables: `SOLANA_RPC_URL`, `POOL_PROGRAM_ID`, `VERIFIER_PROGRAM_ID`, `NULL
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Architecture](docs/architecture.md) | System overview and component design |
-| [Protocol](docs/protocol.md) | Cryptographic specification |
-| [Circuit Constraints](docs/circuit-constraints.md) | Formal constraint analysis |
+| Document                                           | Description                                |
+| -------------------------------------------------- | ------------------------------------------ |
+| [Architecture](docs/architecture.md)               | System overview and component design       |
+| [Protocol](docs/protocol.md)                       | Cryptographic specification                |
+| [Circuit Constraints](docs/circuit-constraints.md) | Formal constraint analysis                 |
 | [Cross-chain Privacy](docs/cross-chain-privacy.md) | Domain-separated nullifiers and epoch sync |
-| [Stealth Addresses](docs/stealth-addresses.md) | One-time address protocol |
-| [Threat Model](docs/threat-model.md) | Trust assumptions and adversary models |
-| [Trusted Setup](docs/trusted-setup.md) | MPC ceremony guide for production keys |
-| [API Reference](docs/api-reference.md) | SDK, programs, and relayer API |
-| [Getting Started](docs/getting-started.md) | Setup and development guide |
+| [Stealth Addresses](docs/stealth-addresses.md)     | One-time address protocol                  |
+| [Threat Model](docs/threat-model.md)               | Trust assumptions and adversary models     |
+| [Trusted Setup](docs/trusted-setup.md)             | MPC ceremony guide for production keys     |
+| [API Reference](docs/api-reference.md)             | SDK, programs, and relayer API             |
+| [Getting Started](docs/getting-started.md)         | Setup and development guide                |
 
 ## Security
 

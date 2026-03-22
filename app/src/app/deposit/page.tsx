@@ -8,12 +8,14 @@ import {
   NoteDisplay,
 } from "@/components/shared";
 import { useHolanc } from "@/hooks/useHolanc";
+import { useChain } from "@/hooks/useChain";
 import { useState } from "react";
 
 export default function DepositPage() {
   const [amount, setAmount] = useState("");
   const { deposit, status, error, note, txSignature, connected, reset } =
     useHolanc();
+  const { nativeCurrency } = useChain();
 
   const handleDeposit = async () => {
     const parsedAmount = parseFloat(amount);
@@ -29,7 +31,11 @@ export default function DepositPage() {
         description="Shield tokens into the Holanc privacy pool. You'll receive a secret note to prove ownership."
       >
         <div className="card space-y-4">
-          <AmountInput value={amount} onChange={setAmount} />
+          <AmountInput
+            value={amount}
+            onChange={setAmount}
+            token={nativeCurrency}
+          />
 
           <ProofStatus
             status={
@@ -75,7 +81,7 @@ export default function DepositPage() {
               onClick={handleDeposit}
             >
               {status === "idle" || status === "done" || status === "error"
-                ? `Deposit ${amount || "0"} SOL`
+                ? `Deposit ${amount || "0"} ${nativeCurrency}`
                 : "Processing…"}
             </button>
             {(status === "done" || status === "error") && (

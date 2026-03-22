@@ -68,8 +68,9 @@ export function AmountInput({
   value,
   onChange,
   label = "Amount",
-  token = "SOL",
+  token,
 }: AmountInputProps) {
+  const displayToken = token ?? "SOL";
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium">{label}</label>
@@ -86,7 +87,7 @@ export function AmountInput({
           }}
         />
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-          {token}
+          {displayToken}
         </span>
       </div>
     </div>

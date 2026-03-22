@@ -477,8 +477,8 @@ export class HolancClient {
     const epoch = data.readUInt32LE(offset + 45);
 
     return {
-      poolAddress: poolPda,
-      tokenMint,
+      poolAddress: poolPda.toBase58(),
+      tokenMint: tokenMint.toBase58(),
       totalDeposited,
       nextLeafIndex,
       currentRoot,

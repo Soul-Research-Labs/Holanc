@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useAccount } from "wagmi";
+import { useChain } from "@/hooks/useChain";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: "⌂" },
@@ -17,7 +20,12 @@ const NAV_ITEMS = [
 
 export function Header() {
   const pathname = usePathname();
-  const { connected } = useWallet();
+  const { connected: solanaConnected } = useWallet();
+  const { isConnected: evmConnected } = useAccount();
+  const { activeChain, setActiveChain, evmEnabled, isSolana, isEvm } =
+    useChain();
+
+  const connected = isSolana ? solanaConnected : evmConnected;
 
   return (
     <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur-md dark:border-gray-800 dark:bg-gray-950/80">
@@ -49,10 +57,46 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Chain selector */}
+          {evmEnabled && (
+            <div className="flex rounded-lg border border-gray-200 dark:border-gray-700">
+              <button
+                className={`px-3 py-1.5 text-xs font-medium transition-colors first:rounded-l-lg ${
+                  isSolana
+                    ? "bg-holanc-600 text-white"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                }`}
+                onClick={() => setActiveChain("solana")}
+              >
+                ◎ Solana
+              </button>
+              <button
+                className={`px-3 py-1.5 text-xs font-medium transition-colors last:rounded-r-lg ${
+                  isEvm
+                    ? "bg-holanc-600 text-white"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                }`}
+                onClick={() => setActiveChain("evm")}
+              >
+                ⟠ Ethereum
+              </button>
+            </div>
+          )}
+
           {connected && (
             <span className="badge-success text-xs">Connected</span>
           )}
-          <WalletMultiButton />
+
+          {/* Wallet button — show the appropriate one for the active chain */}
+          {isSolana ? (
+            <WalletMultiButton />
+          ) : (
+            <ConnectButton
+              showBalance={false}
+              chainStatus="icon"
+              accountStatus="address"
+            />
+          )}
         </div>
       </div>
     </header>

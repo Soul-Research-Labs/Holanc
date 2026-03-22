@@ -34,7 +34,9 @@ async function getPoseidon() {
   return _poseidon;
 }
 
-const HKDF_INFO = new TextEncoder().encode("holanc-note-v1");
+const HKDF_INFO = new TextEncoder().encode(
+  "holanc-note-v1",
+) as unknown as BufferSource;
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
@@ -102,16 +104,20 @@ export async function encryptNote(
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    aesKey,
+    aesKey as unknown as Uint8Array<ArrayBuffer>,
     "AES-GCM",
     false,
     ["encrypt"],
   );
 
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
+    {
+      name: "AES-GCM",
+      iv: iv as unknown as BufferSource,
+      tagLength: TAG_LENGTH * 8,
+    },
     cryptoKey,
-    ptBytes,
+    ptBytes as unknown as BufferSource,
   );
 
   // Concatenate IV || ciphertext+tag
@@ -161,16 +167,20 @@ export async function decryptNote(
 
     const cryptoKey = await crypto.subtle.importKey(
       "raw",
-      aesKey,
+      aesKey as unknown as Uint8Array<ArrayBuffer>,
       "AES-GCM",
       false,
       ["decrypt"],
     );
 
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv, tagLength: TAG_LENGTH * 8 },
+      {
+        name: "AES-GCM",
+        iv: iv as unknown as BufferSource,
+        tagLength: TAG_LENGTH * 8,
+      },
       cryptoKey,
-      ct,
+      ct as unknown as BufferSource,
     );
 
     return decodePlaintext(new Uint8Array(decrypted));
@@ -213,7 +223,7 @@ function hexToBytes32(hex: string): Uint8Array {
 async function hkdfDeriveKey(ikm: Uint8Array): Promise<Uint8Array> {
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    ikm,
+    ikm as unknown as BufferSource,
     "HKDF",
     false,
     ["deriveBits"],
@@ -230,7 +240,7 @@ async function hkdfDeriveKey(ikm: Uint8Array): Promise<Uint8Array> {
     256,
   );
 
-  return new Uint8Array(derivedBits);
+  return new Uint8Array(derivedBits as ArrayBuffer);
 }
 
 /** Encode note plaintext to bytes: value(8) || blinding(32) || assetId(32) = 72 bytes. */

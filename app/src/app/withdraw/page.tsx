@@ -3,6 +3,7 @@
 import { Header } from "@/components/Header";
 import { PageShell, AmountInput, ProofStatus } from "@/components/shared";
 import { useHolanc } from "@/hooks/useHolanc";
+import { useChain } from "@/hooks/useChain";
 import { useState } from "react";
 
 export default function WithdrawPage() {
@@ -11,6 +12,7 @@ export default function WithdrawPage() {
   const [amount, setAmount] = useState("");
   const { withdraw, status, error, txSignature, connected, reset } =
     useHolanc();
+  const { nativeCurrency, isSolana } = useChain();
 
   const handleWithdraw = async () => {
     const parsedAmount = parseFloat(amount);
@@ -24,7 +26,7 @@ export default function WithdrawPage() {
       <Header />
       <PageShell
         title="Withdraw"
-        description="Unshield tokens from the privacy pool back to any Solana address. Uses a ZK proof to break the on-chain link."
+        description="Unshield tokens from the privacy pool back to any address. Uses a ZK proof to break the on-chain link."
       >
         <div className="card space-y-4">
           <div>
@@ -45,13 +47,21 @@ export default function WithdrawPage() {
             </label>
             <input
               className="input font-mono text-xs"
-              placeholder="Solana address to receive tokens"
+              placeholder={
+                isSolana
+                  ? "Solana address to receive tokens"
+                  : "0x address to receive tokens"
+              }
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
             />
           </div>
 
-          <AmountInput value={amount} onChange={setAmount} />
+          <AmountInput
+            value={amount}
+            onChange={setAmount}
+            token={nativeCurrency}
+          />
 
           <ProofStatus
             status={
@@ -96,7 +106,7 @@ export default function WithdrawPage() {
             onClick={handleWithdraw}
           >
             {status === "idle" || status === "done" || status === "error"
-              ? `Withdraw ${amount || "0"} SOL`
+              ? `Withdraw ${amount || "0"} ${nativeCurrency}`
               : "Processing…"}
           </button>
 

@@ -8,6 +8,7 @@ import {
   NoteDisplay,
 } from "@/components/shared";
 import { useHolanc } from "@/hooks/useHolanc";
+import { useChain } from "@/hooks/useChain";
 import { useState } from "react";
 
 export default function TransferPage() {
@@ -16,6 +17,7 @@ export default function TransferPage() {
   const [amount, setAmount] = useState("");
   const { transfer, status, error, note, txSignature, connected, reset } =
     useHolanc();
+  const { nativeCurrency, isSolana } = useChain();
 
   const handleTransfer = async () => {
     const parsedAmount = parseFloat(amount);
@@ -50,13 +52,19 @@ export default function TransferPage() {
             </label>
             <input
               className="input font-mono text-xs"
-              placeholder="Recipient Solana address"
+              placeholder={
+                isSolana ? "Recipient Solana address" : "Recipient 0x address"
+              }
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
             />
           </div>
 
-          <AmountInput value={amount} onChange={setAmount} />
+          <AmountInput
+            value={amount}
+            onChange={setAmount}
+            token={nativeCurrency}
+          />
 
           <ProofStatus
             status={

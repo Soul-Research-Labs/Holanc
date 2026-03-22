@@ -2,15 +2,16 @@
 
 import { Header } from "@/components/Header";
 import { PageShell, ProofStatus } from "@/components/shared";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
 import { useHolanc } from "@/hooks/useHolanc";
+import { useChain } from "@/hooks/useChain";
 
 type ComplianceTab = "disclosure" | "wealth" | "oracle";
 
 export default function CompliancePage() {
-  const { connected, publicKey } = useWallet();
+  const { nativeCurrency, isSolana } = useChain();
   const holanc = useHolanc();
+  const connected = holanc.connected;
   const [tab, setTab] = useState<ComplianceTab>("disclosure");
   const [result, setResult] = useState<string | null>(null);
 
@@ -40,7 +41,7 @@ export default function CompliancePage() {
     const sig = await holanc.generateWealthProof(t);
     if (sig) {
       setResult(
-        `ZK wealth proof generated! Proves shielded balance ≥ ${t} SOL without revealing exact amount. Tx: ${sig.slice(
+        `ZK wealth proof generated! Proves shielded balance ≥ ${t} ${nativeCurrency} without revealing exact amount. Tx: ${sig.slice(
           0,
           16,
         )}…`,
@@ -121,7 +122,11 @@ export default function CompliancePage() {
               </label>
               <input
                 className="input font-mono text-xs"
-                placeholder="Registered compliance oracle public key"
+                placeholder={
+                  isSolana
+                    ? "Registered compliance oracle public key"
+                    : "Registered compliance oracle 0x address"
+                }
                 value={oracleAddress}
                 onChange={(e) => setOracleAddress(e.target.value)}
               />
@@ -154,7 +159,7 @@ export default function CompliancePage() {
 
             <div>
               <label className="mb-1.5 block text-sm font-medium">
-                Minimum Threshold (SOL)
+                Minimum Threshold ({nativeCurrency})
               </label>
               <input
                 type="text"

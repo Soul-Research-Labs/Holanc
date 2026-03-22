@@ -160,11 +160,11 @@ export class SolanaAdapter implements ChainAdapter {
       new PublicKey(this.config.tokenMint),
     );
     return {
-      poolAddress: status.poolAddress.toBase58(),
-      tokenAddress: status.tokenMint.toBase58(),
+      poolAddress: status.poolAddress,
+      tokenAddress: status.tokenMint,
       totalDeposited: status.totalDeposited,
       nextLeafIndex: status.nextLeafIndex,
-      currentRoot: Buffer.from(status.currentRoot, "hex").toString("hex"),
+      currentRoot: status.currentRoot,
       isPaused: status.isPaused,
       epoch: status.epoch,
     };

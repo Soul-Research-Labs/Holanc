@@ -2,18 +2,20 @@
 
 import { Header } from "@/components/Header";
 import { PageShell, AmountInput, ProofStatus } from "@/components/shared";
-import { useWallet } from "@solana/wallet-adapter-react";
 import { useState } from "react";
 import { useHolanc } from "@/hooks/useHolanc";
+import { useChain } from "@/hooks/useChain";
 
 const CHAINS = [
   { id: 1, name: "Solana", icon: "◎" },
   { id: 2, name: "Eclipse", icon: "🌑" },
   { id: 3, name: "Sonic", icon: "⚡" },
+  { id: 100, name: "Ethereum", icon: "⟠" },
 ];
 
 export default function BridgePage() {
-  const { connected } = useWallet();
+  const { nativeCurrency } = useChain();
+  const connected = useHolanc().connected;
   const holanc = useHolanc();
   const [sourceChain, setSourceChain] = useState(1);
   const [destChain, setDestChain] = useState(2);
@@ -40,7 +42,7 @@ export default function BridgePage() {
       <Header />
       <PageShell
         title="Cross-Chain Bridge"
-        description="Bridge shielded assets between Solana Virtual Machine (SVM) chains while preserving privacy."
+        description="Bridge shielded assets across chains while preserving privacy."
       >
         <div className="card space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -95,7 +97,11 @@ export default function BridgePage() {
             />
           </div>
 
-          <AmountInput value={amount} onChange={setAmount} />
+          <AmountInput
+            value={amount}
+            onChange={setAmount}
+            token={nativeCurrency}
+          />
 
           <ProofStatus
             status={

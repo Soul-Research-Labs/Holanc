@@ -15,6 +15,7 @@ type EvmEventLike = {
   args?: [string, bigint, string];
   transactionHash: string;
   blockNumber: number;
+  removed?: boolean;
 };
 
 type EvmContractLike = {
@@ -102,8 +103,20 @@ export class EvmNoteScanner {
         string,
         bigint,
         string,
-        { log?: { blockNumber?: number; transactionHash?: string } },
+        {
+          log?: {
+            blockNumber?: number;
+            transactionHash?: string;
+            removed?: boolean;
+          };
+        },
       ];
+      if (event.log?.removed) {
+        console.warn(
+          `[evm-scanner] reorg detected — ignoring removed NewCommitment event`,
+        );
+        return;
+      }
       const blockNumber = (event.log as { blockNumber: number } | undefined)
         ?.blockNumber;
       const transactionHash =
@@ -124,8 +137,20 @@ export class EvmNoteScanner {
         string,
         bigint,
         bigint,
-        { log?: { blockNumber?: number; transactionHash?: string } },
+        {
+          log?: {
+            blockNumber?: number;
+            transactionHash?: string;
+            removed?: boolean;
+          };
+        },
       ];
+      if (event.log?.removed) {
+        console.warn(
+          `[evm-scanner] reorg detected — ignoring removed DepositEvent`,
+        );
+        return;
+      }
       void depositor;
       void amount; // used only for existing NewCommitment indexing
       const blockNumber = (event.log as { blockNumber: number } | undefined)
@@ -187,6 +212,7 @@ export class EvmNoteScanner {
       const events = await pool.queryFilter(filter, Number(start), Number(end));
       for (const ev of events) {
         if (!("args" in ev) || !ev.args) continue;
+        if (ev.removed) continue; // skip reorged events
         const [commitment, leafIndex, encryptedNote] = ev.args as [
           string,
           bigint,

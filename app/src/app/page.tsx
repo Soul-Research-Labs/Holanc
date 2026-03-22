@@ -1,7 +1,7 @@
 "use client";
 
 import { Header } from "@/components/Header";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useHolanc } from "@/hooks/useHolanc";
 import Link from "next/link";
 
 const FEATURES = [
@@ -23,7 +23,7 @@ const FEATURES = [
   {
     href: "/withdraw",
     title: "Withdraw",
-    description: "Unshield tokens back to any Solana address with a ZK proof.",
+    description: "Unshield tokens back to any address with a ZK proof.",
     icon: "↑",
     color:
       "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
@@ -39,8 +39,7 @@ const FEATURES = [
   {
     href: "/bridge",
     title: "Cross-Chain Bridge",
-    description:
-      "Bridge shielded assets across Solana, Eclipse, and Sonic SVMs.",
+    description: "Bridge shielded assets across Solana and EVM chains.",
     icon: "🌉",
     color:
       "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
@@ -55,7 +54,7 @@ const FEATURES = [
 ];
 
 export default function DashboardPage() {
-  const { connected } = useWallet();
+  const { connected } = useHolanc();
 
   return (
     <>
@@ -64,11 +63,11 @@ export default function DashboardPage() {
         <div className="text-center">
           <h1 className="text-4xl font-bold tracking-tight">
             Private Transactions on{" "}
-            <span className="text-holanc-600">Solana</span>
+            <span className="text-holanc-600">Any Chain</span>
           </h1>
           <p className="mt-3 text-lg text-gray-500 dark:text-gray-400">
             Holanc uses Groth16 zero-knowledge proofs to enable fully private
-            deposits, transfers, and withdrawals on Solana and multi-SVM chains.
+            deposits, transfers, and withdrawals on Solana and EVM chains.
           </p>
         </div>
 

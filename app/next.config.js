@@ -11,6 +11,13 @@ const nextConfig = {
       path: false,
       crypto: false,
     };
+    // wagmi connectors reference optional peer deps that may not be installed
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      "porto/internal": false,
+      porto: false,
+      "@base-org/account": false,
+    };
     return config;
   },
 };

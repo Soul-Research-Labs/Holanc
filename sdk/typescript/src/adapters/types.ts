@@ -10,7 +10,6 @@ import {
   DepositResult,
   TransferResult,
   WithdrawResult,
-  PoolStatus,
   Groth16Proof,
 } from "../types";
 
@@ -111,4 +110,32 @@ export interface AdapterConfig {
   verifierAddress?: string;
   /** Nullifier contract address. */
   nullifierAddress?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Chain configuration
+// ---------------------------------------------------------------------------
+
+/** Supported chain types. */
+export type ChainType = "solana" | "evm";
+
+/** Chain-specific configuration used by the adapter factory and frontend. */
+export interface ChainConfig {
+  chainType: ChainType;
+  /** Display name shown in UI (e.g. "Ethereum", "Solana Devnet"). */
+  chainName: string;
+  /** EIP-155 chain ID for EVM chains, or a numeric identifier for Solana. */
+  chainId: number;
+  rpcUrl: string;
+  poolAddress: string;
+  /** ERC-20 token address (EVM) or SPL mint address (Solana). */
+  tokenAddress: string;
+  verifierAddress?: string;
+  nullifierAddress?: string;
+  bridgeAddress?: string;
+  complianceAddress?: string;
+  /** Block explorer base URL (e.g. "https://etherscan.io"). */
+  explorerUrl?: string;
+  /** Native currency symbol (e.g. "ETH", "SOL"). */
+  nativeCurrency?: string;
 }

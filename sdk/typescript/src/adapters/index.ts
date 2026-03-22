@@ -15,6 +15,8 @@ export type {
   TransferParams,
   WithdrawParams,
   AdapterFactory,
+  ChainType,
+  ChainConfig,
 } from "./types";
 
 export { SolanaAdapter } from "./solana";
@@ -22,3 +24,5 @@ export type { SolanaAdapterConfig } from "./solana";
 
 export { EvmAdapter } from "./evm";
 export type { EvmAdapterConfig } from "./evm";
+
+export { createEvmAdapter } from "./factory";

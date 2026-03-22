@@ -6,7 +6,10 @@ declare module "circomlibjs" {
     };
     Base8: [unknown, unknown];
     subOrder: bigint;
-    mulPointEscalar(point: [unknown, unknown], scalar: bigint): [unknown, unknown];
+    mulPointEscalar(
+      point: [unknown, unknown],
+      scalar: bigint,
+    ): [unknown, unknown];
   }>;
 
   export function buildPoseidon(): Promise<{

@@ -1,5 +1,3 @@
-import { PublicKey } from "@solana/web3.js";
-
 /** A 32-byte hash represented as a hex string. */
 export type Hash32 = string;
 
@@ -47,10 +45,10 @@ export interface Groth16Proof {
   curve?: string;
 }
 
-/** Pool status information. */
+/** Pool status information (chain-agnostic). */
 export interface PoolStatus {
-  poolAddress: PublicKey;
-  tokenMint: PublicKey;
+  poolAddress: string;
+  tokenMint: string;
   totalDeposited: bigint;
   nextLeafIndex: number;
   currentRoot: Hash32;

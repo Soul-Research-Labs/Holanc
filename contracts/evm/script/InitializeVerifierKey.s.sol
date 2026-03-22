@@ -40,20 +40,30 @@ contract InitializeVerifierKey is Script {
         console2.log("Verifier key initialized");
         console2.log("verifier", verifierAddress);
         console2.log("circuitType", uint256(circuitType));
-        console2.log("circuitLabel", bytes(circuitLabel).length == 0 ? "(unset)" : circuitLabel);
+        console2.log(
+            "circuitLabel",
+            bytes(circuitLabel).length == 0 ? "(unset)" : circuitLabel
+        );
         console2.log("vkeyPath", vkeyPath);
         console2.log("publicInputs", nPublic);
         console2.log("icPoints", ic.length);
     }
 
-    function _loadVerifierAddress() internal view returns (address verifierAddress) {
+    function _loadVerifierAddress()
+        internal
+        view
+        returns (address verifierAddress)
+    {
         verifierAddress = vm.envOr("VERIFIER_ADDRESS", address(0));
         if (verifierAddress == address(0)) {
             verifierAddress = vm.envAddress("HOLANC_VERIFIER_ADDRESS");
         }
     }
 
-    function _readG1(string memory json, string memory key) internal pure returns (uint256[2] memory point) {
+    function _readG1(
+        string memory json,
+        string memory key
+    ) internal pure returns (uint256[2] memory point) {
         string[] memory raw = json.readStringArray(key);
         require(raw.length >= 2, "invalid G1 point");
 
@@ -61,7 +71,10 @@ contract InitializeVerifierKey is Script {
         point[1] = vm.parseUint(raw[1]);
     }
 
-    function _readG2(string memory json, string memory key) internal pure returns (uint256[2][2] memory point) {
+    function _readG2(
+        string memory json,
+        string memory key
+    ) internal pure returns (uint256[2][2] memory point) {
         string[] memory c0 = json.readStringArray(string.concat(key, "[0]"));
         string[] memory c1 = json.readStringArray(string.concat(key, "[1]"));
         require(c0.length >= 2 && c1.length >= 2, "invalid G2 point");
@@ -72,11 +85,16 @@ contract InitializeVerifierKey is Script {
         point[1][1] = vm.parseUint(c1[1]);
     }
 
-    function _readIc(string memory json, uint256 length) internal pure returns (uint256[2][] memory ic) {
+    function _readIc(
+        string memory json,
+        uint256 length
+    ) internal pure returns (uint256[2][] memory ic) {
         ic = new uint256[2][](length);
 
         for (uint256 i = 0; i < length; i++) {
-            string[] memory raw = json.readStringArray(string.concat(".IC[", vm.toString(i), "]"));
+            string[] memory raw = json.readStringArray(
+                string.concat(".IC[", vm.toString(i), "]")
+            );
             require(raw.length >= 2, "invalid IC point");
             ic[i][0] = vm.parseUint(raw[0]);
             ic[i][1] = vm.parseUint(raw[1]);

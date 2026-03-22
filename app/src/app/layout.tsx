@@ -3,9 +3,9 @@ import { WalletProvider } from "@/providers/WalletProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Holanc — Private Transactions on Solana",
+  title: "Holanc — Private Transactions",
   description:
-    "Zero-knowledge privacy protocol for Solana. Deposit, transfer, and withdraw privately using Groth16 proofs.",
+    "Zero-knowledge privacy protocol for Solana and EVM chains. Deposit, transfer, and withdraw privately using Groth16 proofs.",
 };
 
 export default function RootLayout({

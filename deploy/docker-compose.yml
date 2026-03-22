@@ -23,6 +23,8 @@ services:
       SOLANA_RPC_URL: http://validator:8899
       RELAYER_PORT: "3001"
       RATE_LIMIT_MAX: "60"
+      ETH_RPC_URL: ${ETH_RPC_URL:-}
+      ETH_RELAYER_PRIVATE_KEY: ${ETH_RELAYER_PRIVATE_KEY:-}
     depends_on:
       validator:
         condition: service_healthy
@@ -36,6 +38,10 @@ services:
     environment:
       SOLANA_RPC_URL: http://validator:8899
       INDEXER_DB_PATH: /data/holanc-indexer.db
+      EVM_RPC_URL: ${EVM_RPC_URL:-}
+      HOLANC_POOL_ADDRESS: ${HOLANC_POOL_ADDRESS:-}
+      EVM_CATCHUP_BLOCKS: ${EVM_CATCHUP_BLOCKS:-1000}
+      EVM_POLL_INTERVAL_MS: ${EVM_POLL_INTERVAL_MS:-4000}
     depends_on:
       validator:
         condition: service_healthy
@@ -49,6 +55,12 @@ services:
     environment:
       NEXT_PUBLIC_RPC_URL: http://validator:8899
       NEXT_PUBLIC_RELAYER_URL: http://relayer:3001
+      NEXT_PUBLIC_EVM_RPC_URL: ${NEXT_PUBLIC_EVM_RPC_URL:-}
+      NEXT_PUBLIC_EVM_CHAIN_ID: ${NEXT_PUBLIC_EVM_CHAIN_ID:-1}
+      NEXT_PUBLIC_EVM_CHAIN_NAME: ${NEXT_PUBLIC_EVM_CHAIN_NAME:-Ethereum}
+      NEXT_PUBLIC_EVM_POOL_ADDRESS: ${NEXT_PUBLIC_EVM_POOL_ADDRESS:-}
+      NEXT_PUBLIC_EVM_NATIVE_CURRENCY: ${NEXT_PUBLIC_EVM_NATIVE_CURRENCY:-ETH}
+      NEXT_PUBLIC_EVM_EXPLORER_URL: ${NEXT_PUBLIC_EVM_EXPLORER_URL:-}
     depends_on:
       - relayer
 

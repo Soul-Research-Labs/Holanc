@@ -23,7 +23,16 @@ contract DeployHolanc is Script {
         HolancCompliance.ComplianceMode complianceMode;
     }
 
-    function run() external returns (HolancVerifier verifier, HolancNullifier nullifier, HolancPool pool, HolancBridge bridge, HolancCompliance compliance) {
+    function run()
+        external
+        returns (
+            HolancVerifier verifier,
+            HolancNullifier nullifier,
+            HolancPool pool,
+            HolancBridge bridge,
+            HolancCompliance compliance
+        )
+    {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
         DeployConfig memory cfg = _loadConfig(deployer);
@@ -32,31 +41,71 @@ contract DeployHolanc is Script {
 
         verifier = new HolancVerifier();
         nullifier = new HolancNullifier();
-        pool = new HolancPool(cfg.token, address(verifier), address(nullifier), cfg.feeCollector);
+        pool = new HolancPool(
+            cfg.token,
+            address(verifier),
+            address(nullifier),
+            cfg.feeCollector
+        );
         bridge = new HolancBridge();
         compliance = new HolancCompliance();
 
-        nullifier.initialize(address(pool), address(pool), cfg.epochDurationBlocks);
-        bridge.initialize(address(pool), cfg.localChainId, cfg.localAppId, cfg.lzEndpoint);
-        compliance.initialize(address(pool), address(verifier), cfg.complianceMode, cfg.proofExpirySeconds);
+        nullifier.initialize(
+            address(pool),
+            address(pool),
+            cfg.epochDurationBlocks
+        );
+        bridge.initialize(
+            address(pool),
+            cfg.localChainId,
+            cfg.localAppId,
+            cfg.lzEndpoint
+        );
+        compliance.initialize(
+            address(pool),
+            address(verifier),
+            cfg.complianceMode,
+            cfg.proofExpirySeconds
+        );
         pool.setBridge(address(bridge));
 
         vm.stopBroadcast();
 
-        _printSummary(deployer, cfg, verifier, nullifier, pool, bridge, compliance);
+        _printSummary(
+            deployer,
+            cfg,
+            verifier,
+            nullifier,
+            pool,
+            bridge,
+            compliance
+        );
     }
 
-    function _loadConfig(address deployer) internal view returns (DeployConfig memory cfg) {
+    function _loadConfig(
+        address deployer
+    ) internal view returns (DeployConfig memory cfg) {
         cfg.token = vm.envAddress("TOKEN_ADDRESS");
         cfg.feeCollector = vm.envOr("FEE_COLLECTOR", deployer);
         cfg.lzEndpoint = vm.envOr("LZ_ENDPOINT", address(0));
-        cfg.localChainId = uint64(vm.envOr("LOCAL_CHAIN_ID", uint256(block.chainid)));
+        cfg.localChainId = uint64(
+            vm.envOr("LOCAL_CHAIN_ID", uint256(block.chainid))
+        );
         cfg.localAppId = uint64(vm.envOr("LOCAL_APP_ID", uint256(1)));
-        cfg.epochDurationBlocks = vm.envOr("EPOCH_DURATION_BLOCKS", uint256(7200));
-        cfg.proofExpirySeconds = int64(int256(vm.envOr("PROOF_EXPIRY_SECONDS", uint256(86400))));
+        cfg.epochDurationBlocks = vm.envOr(
+            "EPOCH_DURATION_BLOCKS",
+            uint256(7200)
+        );
+        cfg.proofExpirySeconds = int64(
+            int256(vm.envOr("PROOF_EXPIRY_SECONDS", uint256(86400)))
+        );
 
         uint256 complianceModeRaw = vm.envOr("COMPLIANCE_MODE", uint256(1));
-        require(complianceModeRaw <= uint256(type(HolancCompliance.ComplianceMode).max), "invalid COMPLIANCE_MODE");
+        require(
+            complianceModeRaw <=
+                uint256(type(HolancCompliance.ComplianceMode).max),
+            "invalid COMPLIANCE_MODE"
+        );
         cfg.complianceMode = HolancCompliance.ComplianceMode(complianceModeRaw);
     }
 
@@ -78,7 +127,10 @@ contract DeployHolanc is Script {
         console2.log("localChainId", cfg.localChainId);
         console2.log("localAppId", cfg.localAppId);
         console2.log("epochDurationBlocks", cfg.epochDurationBlocks);
-        console2.log("proofExpirySeconds", uint256(uint64(cfg.proofExpirySeconds)));
+        console2.log(
+            "proofExpirySeconds",
+            uint256(uint64(cfg.proofExpirySeconds))
+        );
 
         console2.log("HOLANC_VERIFIER_ADDRESS=%s", address(verifier));
         console2.log("HOLANC_NULLIFIER_ADDRESS=%s", address(nullifier));
